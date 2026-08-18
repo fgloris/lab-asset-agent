@@ -79,13 +79,21 @@ class VisionCodingAgent:
         reference_images: list[Path] = (),
     ) -> VisionCodeDecision:
         selected = self._select_images(images)
-        reference_images = list(reference_images)
+        reference_images = list(reference_images)[: self.model_config.max_images]
+        image_labels = [
+            f"图{index}: 当前渲染视角 {path.name}"
+            for index, path in enumerate(selected, start=1)
+        ]
+        image_labels += [
+            f"图{index}: 参考产品图 {path.name}"
+            for index, path in enumerate(reference_images, start=len(image_labels) + 1)
+        ]
         content: list[dict] = [
             {
                 "type": "text",
                 "text": build_review_prompt(
                     iteration=iteration,
-                    view_names=[path.name for path in selected],
+                    image_labels=image_labels,
                     pass_score=self.config.loop.pass_score,
                     spec_json=json.dumps(
                         spec.model_dump(mode="json"), ensure_ascii=False, indent=2
@@ -113,7 +121,7 @@ class VisionCodingAgent:
                     },
                 }
             )
-        for image_path in reference_images[: self.model_config.max_images]:
+        for image_path in reference_images:
             content.append(
                 {
                     "type": "image_url",
@@ -156,7 +164,7 @@ class VisionCodingAgent:
         human_hint: str | None = None,
         reference_images: list[Path] = (),
     ) -> ScriptRepair:
-        reference_images = list(reference_images)
+        reference_images = list(reference_images)[: self.model_config.max_images]
         prompt = build_repair_prompt(
             iteration=iteration,
             spec_json=json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2),
@@ -170,7 +178,7 @@ class VisionCodingAgent:
         user_content: str | list[dict] = prompt
         if reference_images:
             user_content = [{"type": "text", "text": prompt}]
-            for image_path in reference_images[: self.model_config.max_images]:
+            for image_path in reference_images:
                 user_content.append(
                     {
                         "type": "image_url",

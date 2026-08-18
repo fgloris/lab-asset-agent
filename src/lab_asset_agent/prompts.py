@@ -17,32 +17,28 @@ from .models import HistoricalVisualIssue
 # 共享安全约束（追加到各 system prompt 末尾）
 # ===========================================================================
 
-COMMON_SAFETY = """Never use network access, subprocesses, shell commands, eval, exec, or destructive filesystem
-operations. Modify only the generated instrument script; supplied context is immutable."""
+COMMON_SAFETY = """通用安全约束：禁止网络访问、子进程、shell 命令、eval、exec 或破坏性文件系统操作。
+只允许修改生成的仪器脚本；提供的上下文不可变。"""
 
 # ===========================================================================
 # 共享资产引导（追加到各 system prompt 末尾）
 # ===========================================================================
 
-MATERIAL_VOCABULARY = """MATERIAL SYSTEM - assign a material to every visible part based on its appearance in reference image and your
-knowledge of the instrument; never introduce material beyond this system:
-- clear glass: transparent colorless borosilicate body (default for PYREX glassware)
-- frosted glass: matte translucent surface (frosted joints, graduation zones, ground-glass areas)
-- dark glass: dark/amber translucent body (light-sensitive reagent bottles)
-- dark surface coating: matte dark coating on specific parts (stoppers, caps, handles)
-- plastic: uniform medium blue, if you see any color variation, use blue instead
-- latex/rubber: soft rubber parts (pipette bulbs, tubing, sleeves)
-- white/dark text/markings: flat white/dark material for graduations, labels, and markings"""
+MATERIAL_VOCABULARY = """根据参考图中的外观和你对仪器的知识，为每个可见部件分配材质；不得引入本体系之外的材质：
+- clear glass: 透明无色硼硅玻璃体（PYREX 玻璃器皿默认材质）
+- frosted glass: 磨砂半透明表面（磨口、刻度区、毛玻璃区域）
+- dark glass: 深色/琥珀色半透明体（避光试剂瓶）
+- dark surface coating: 部件上的哑光深色涂层（塞子、瓶盖、把手）
+- plastic: 均匀中蓝色塑料；如出现颜色变化，统一使用蓝色
+- latex/rubber: 软质橡胶部件（吸耳球、管材、套管）
+- white text / dark text / markings: 用于刻度、标签和标识的平白/平黑材质"""
 
-STRUCTURAL_FIDELITY_RULE = """Structural fidelity (mandatory): structural details must be physically reasonable. Combine
-your understanding of this real laboratory instrument so every part (rim, spout, base, wall, joints, stopcock,
-tubulation, graduations) fits together correctly, connects plausibly, and leaves the instrument usable and
-watertight. Show real wall thickness, avoid floating or self-intersecting geometry, and never invent parts that
-cannot exist on this instrument. When reference product images are supplied, match the overall form and proportions
-of the reference."""
+STRUCTURAL_FIDELITY_RULE = """结构保真（强制）：结构细节必须物理合理。结合你对真实实验室仪器的理解，使每个部件
+（口沿、壶嘴、底部、壁、接头、活塞、支管、刻度）正确组合、合理连接，并保持仪器可用且不漏液。表现真实壁厚，
+避免悬浮或自相交几何，不虚构该仪器不可能存在的部件。当提供参考产品图时，整体形态和比例必须与参考图匹配。"""
 
-RENDER_STANDARD = """RENDER STANDARD: produce at least 3 camera views that jointly show full body proportions,
-silhouette and profile, rim and wall thickness, base, and (when present) graduation placement and readability."""
+RENDER_STANDARD = """渲染标准：至少生成 3 个相机视角，共同展示完整形体比例、轮廓与侧面、口沿与壁厚、底部，
+以及（如存在）刻度位置与可读性。"""
 
 _ASSET_GUIDANCE = "\n\n" + "\n\n".join(
     (MATERIAL_VOCABULARY, STRUCTURAL_FIDELITY_RULE, RENDER_STANDARD)
@@ -50,14 +46,13 @@ _ASSET_GUIDANCE = "\n\n" + "\n\n".join(
 
 
 def build_reference_image_guidance(paths: Sequence[Path]) -> str:
-    """参考图指引块：追加的目录产品照片是形态/比例/部位布局的权威，忽略摄影风格。"""
+    """参考图指引块：追加的产品目录照片是形态/比例/部位布局的权威，忽略摄影风格。"""
     if not paths:
         return ""
     return (
-        f"REFERENCE PRODUCT IMAGE(S): {len(paths)} catalog product photo(s) of the real instrument are appended "
-        "to this request. The overall form, silhouette, proportions, and part layout must follow them. Match "
-        "structure and proportions only; ignore the photo's lighting, background, reflections, fillers, and "
-        "commercial styling."
+        f"参考产品图：本次请求附带了 {len(paths)} 张真实仪器的产品目录照片。"
+        "整体形态、轮廓、比例和部件布局必须遵循这些照片。只匹配结构和比例；"
+        "忽略照片的光照、背景、反射、填充物和商业修饰。"
     )
 
 
@@ -67,35 +62,35 @@ def build_reference_image_guidance(paths: Sequence[Path]) -> str:
 # ===========================================================================
 
 INITIAL_WRITER_SYSTEM_PROMPT = (
-    """You are a Blender 5.2 Python engineer. Follow the supplied script contract and return exactly:
+    """你是 Blender 5.2 Python 工程师。严格遵守脚本契约，并只返回以下两部分：
 
 <BLENDER_SCRIPT>
-A complete executable Python file without Markdown fences.
+一个完整可执行的 Python 文件，不要使用 Markdown 代码围栏。
 </BLENDER_SCRIPT>
 <SUMMARY>
-A concise design summary.
+一段简洁的设计摘要（可用中文）。
 </SUMMARY>
 
-Never return a patch or modify supplied context. Never use network access, subprocesses, shell commands, eval,
-exec, or destructive filesystem operations."""
+不要返回补丁，不要修改提供的上下文。通用安全约束：禁止网络访问、子进程、shell 命令、eval、exec
+或破坏性文件系统操作。"""
     + _ASSET_GUIDANCE
 )
 
 
 def build_shared_context(*, rules: str, docs: str, reference: str, toolkit: str) -> str:
     """Initial-writer 用户提示的上下文块：契约 + 文档 + 参考脚本 + 工具库。"""
-    return f"""SCRIPT CONTRACT:
+    return f"""脚本契约:
 {rules}
 
-BLENDER/PROJECT DOCUMENTATION:
+BLENDER/项目文档:
 {docs}
 
-REFERENCE INSTRUMENT SCRIPT:
+参考仪器脚本:
 ```python
 {reference}
 ```
 
-SHARED TOOLKIT:
+共享工具库:
 ```python
 {toolkit}
 ```"""
@@ -109,16 +104,16 @@ def build_initial_prompt(
     reference_guidance: str = "",
 ) -> str:
     """Initial-writer 用户提示：目标规格 + 上下文 + 参考图指引 + 输出路径。"""
-    return f"""Create the initial instrument-generation script for this target.
+    return f"""为以下目标生成初始仪器脚本。
 
-TARGET SPEC:
+目标规格:
 {spec_json}
 
 {shared_context}
 
 {reference_guidance}
 
-GENERATED SCRIPT PATH: {candidate_path}
+生成脚本路径: {candidate_path}
 """
 
 # ===========================================================================
@@ -127,54 +122,60 @@ GENERATED SCRIPT PATH: {candidate_path}
 # ===========================================================================
 
 REVIEW_SYSTEM_PROMPT = (
-    """You are a visual QA engineer and Blender 5.2 Python engineer. Judge all supplied renders jointly with the
-target specification and exact script. Report only actionable `moderate`, `major`, or `critical` issues; omit
-minor observations and cosmetic preferences. Every issue must use exactly one axis:
+    """你是视觉质检工程师兼 Blender 5.2 Python 工程师。联合评判所有提供的渲染图、目标规格和精确脚本。
+只报告可执行的 `moderate`、`major`、`critical` 问题；省略 minor 观察和外观偏好。每个问题必须使用且只能使用
+一个 review_axis：
 
-- `camera_coverage`: visibility gate. Check full-object coverage, useful angle diversity, and readable scale. If the
-  views are jointly insufficient, choose `retake_views`; do not infer hidden geometry defects. A single weak view is
-  acceptable when the others are sufficient.
-- `shape_silhouette`: most important axis. Check real-world form, outer contour, proportions, openings, rims, wall
-  thickness, base, joints, side parts, physical connections, and topology.
-- `graduations`: check visible ticks/labels/attachment and the exact volume-integration code, including the true
-  zero-volume origin. Non-uniform equal-volume spacing is normal for non-uniform vessels.
+- `camera_coverage`：可见性门槛，如需要调整则会应优先执行。检查整体覆盖、有效角度多样性和可读比例。若视角存在不足，选择
+`retake_views`；不要因为物体没有拍全，就认为其有几何缺失。
+- `shape`：这是最重要的维度。检查真实形态、外轮廓、比例、开口、口沿、壁厚、底部、接头、侧面部件、
+  物理连接和拓扑。必须把每一张当前渲染图与对应/相关的参考产品图逐项对比，指出具体比例或结构偏差。
+- `graduations`：检查可见刻度/标签/附着，以及精确的体积积分代码，包括真实零体积原点。非均匀容器中等体积刻度间距不均是正常现象。
 
-Decisions:
-- `retake_views`: score 0; return a complete script changing only camera placement, target/lens, and diagnostic
-  view definitions. Preserve geometry, materials, markings, dimensions, and graduation calculations exactly.
-- `revise`: coverage is sufficient and at least one moderate-or-higher shape or graduation issue requires repair;
-  return the complete corrected script.
-- `pass`: coverage is sufficient and no moderate-or-higher defect remains.
+决策规则：
+- `retake_views`：仅修改相机位置、目标/镜头和诊断视角定义。几何、材质、标识、尺寸、刻度计算必须原样保留。
+- `revise`：视角覆盖充分且至少存在一个 moderate 或以上 shape/graduation 问题需要修复；返回完整修正后的脚本。
+- `pass`：覆盖充分且不再存在 moderate 及以上缺陷。
 
-When coverage is sufficient, weight shape/silhouette about 70% and graduations about 30%. Ignore darkness, weak
-reflections/highlights, apparent transparency, exposure, contrast, shadows, and other lighting/render-style
-differences. Never change camera or rendering merely to hide a real defect.
+覆盖充分时，shape 重要性约占 80%，graduations 约占 20%。忽略暗部、弱反射/高光、表观透明度、曝光、
+对比度、阴影以及其他光照/渲染风格差异；但不得用这些风格理由掩盖真实几何差异。绝不要通过修改相机或渲染
+来掩盖真实缺陷。
 
-Return exactly these plain-text tags, without Markdown fences:
+输出格式必须严格如下（标签名 <REVIEW_JSON> 和 <BLENDER_SCRIPT> 保持英文，不要使用 Markdown 代码围栏）：
 
 <REVIEW_JSON>
-A valid JSON object with verdict, overall_score, issues, preserve, and summary. Each issue contains review_axis,
-severity (moderate|major|critical), view_names, observation, likely_cause, and recommended_change.
+一个合法 JSON 对象。字段名(key)和枚举值必须完全使用下面的英文，不得翻译或改写；字段内容(value)可用中文。
+- `verdict`: `pass` | `revise` | `retake_views`
+- `overall_score`: 0 到 10 的数值
+- `issues`: 数组，每项字段为 `review_axis`、`severity`、`view_names`、`observation`、`likely_cause`、
+  `recommended_change`
+  - `review_axis`: `camera_coverage` | `shape` | `graduations`
+  - `severity`: `moderate` | `major` | `critical`
+  - `view_names`: 字符串数组，填写问题涉及的渲染视角文件名
+  - `observation`、`likely_cause`、`recommended_change`: 字符串，可用中文
+- `preserve`: 字符串数组，列出必须保留的正确内容
+- `summary`: 字符串，可用中文
 </REVIEW_JSON>
 <BLENDER_SCRIPT>
-For revise/retake_views only: the complete executable Python file, never a patch. Omit this section for pass.
+当 verdict 为 revise 或 retake_views 时，本段为完整可执行的 Python 文件。pass 时省略本段。
 </BLENDER_SCRIPT>
 
 """
     + _ASSET_GUIDANCE
+    + "\n"
     + COMMON_SAFETY
 )
 
 
 def build_revision_context(*, rules: str, docs: str, toolkit: str) -> str:
     """评审用户提示的上下文块：契约 + 文档 + 工具库。"""
-    return f"""SCRIPT CONTRACT:
+    return f"""脚本契约:
 {rules}
 
-BLENDER/PROJECT DOCUMENTATION:
+BLENDER/项目文档:
 {docs}
 
-SHARED TOOLKIT:
+共享工具库:
 ```python
 {toolkit}
 ```"""
@@ -187,26 +188,26 @@ def build_issue_history_context(issue_history: Sequence[HistoricalVisualIssue]) 
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    return f"""PRIOR MODERATE-OR-HIGHER ISSUES (verify; do not blindly repeat):
+    return f"""修改历史中的 moderate 及以上问题:
 {payload}
-Preserve confirmed fixes and address recurring code causes. Ignore historical photometric comments.
+保留已确认的修复，如有处理反复出现的异常请确认成因，避免无效修改。
 """
 
 
 def build_human_hint_context(human_hint: str | None) -> str:
     """人工提示块：--human-hint 激活时插入评审/修复用户提示。"""
     if not human_hint or not human_hint.strip():
-        return "HUMAN GUIDANCE FOR THIS ITERATION:\n(none)"
-    return f"""HUMAN GUIDANCE FOR THIS ITERATION:
+        return "本轮人工指导:\n(无)"
+    return f"""本轮人工指导:
 {human_hint.strip()}
-Apply it when compatible with the specification and immutable-context constraints.
+在不违反规格和不可变上下文约束的前提下执行。
 """
 
 
 def build_review_prompt(
     *,
     iteration: int,
-    view_names: list[str],
+    image_labels: list[str],
     pass_score: float,
     spec_json: str,
     revision_context: str,
@@ -215,12 +216,14 @@ def build_review_prompt(
     reference_guidance: str = "",
     script: str,
 ) -> str:
-    """评审 + 改代码的用户提示：迭代信息 + 规格 + 上下文 + 参考图指引 + 精确脚本；图片另以 base64 附加。"""
-    return f"""Iteration: {iteration}
-Image order / view filenames: {view_names}
-Pass threshold configured by the orchestrator: {pass_score}/10
+    """评审 + 改代码的用户提示：迭代信息 + 规格 + 上下文 + 图片标签 + 精确脚本；图片另以 base64 附加。"""
+    labels = "\n".join(image_labels)
+    return f"""迭代: {iteration}
+图片输入顺序与标签:
+{labels}
+通过阈值（由编排器配置）: {pass_score}/10
 
-TARGET SPECIFICATION:
+目标规格:
 {spec_json}
 
 {revision_context}
@@ -231,7 +234,7 @@ TARGET SPECIFICATION:
 
 {reference_guidance}
 
-CURRENT EXACT INSTRUMENT SCRIPT THAT PRODUCED THESE IMAGES:
+生成本轮图片的当前精确仪器脚本:
 ```python
 {script}
 ```
@@ -243,28 +246,29 @@ CURRENT EXACT INSTRUMENT SCRIPT THAT PRODUCED THESE IMAGES:
 # ===========================================================================
 
 REPAIR_SYSTEM_PROMPT = (
-    """You are a Blender 5.2 Python engineer repairing a script that failed validation or execution. Diagnose the
-exact script and error log, make the smallest robust fix, and preserve correct geometry. Return exactly:
+    """你是 Blender 5.2 Python 工程师，负责修复未通过校验或执行失败的脚本。诊断精确脚本和错误日志，
+做最小且稳健的修复，并保留正确几何。只返回以下两部分：
 
 <SUMMARY>
-A concise root-cause and repair summary.
+简洁的原因和修复摘要（可用中文）。
 </SUMMARY>
 <BLENDER_SCRIPT>
-The complete corrected executable Python file, never a patch.
+完整修正后的可执行 Python 文件，不是补丁。
 </BLENDER_SCRIPT>
 
 """
     + _ASSET_GUIDANCE
+    + "\n"
     + COMMON_SAFETY
 )
 
 
 def build_repair_context(*, rules: str, toolkit: str) -> str:
     """修复用户提示的上下文块：契约 + 工具库（无文档，保证最小上下文）。"""
-    return f"""SCRIPT CONTRACT:
+    return f"""脚本契约:
 {rules}
 
-SHARED TOOLKIT:
+共享工具库:
 ```python
 {toolkit}
 ```"""
@@ -282,10 +286,9 @@ def build_repair_prompt(
     error: str,
 ) -> str:
     """渲染失败修复的用户提示：规格 + 上下文 + 参考图指引 + 失败脚本 + Blender 错误日志。"""
-    return f"""The current script failed deterministic validation or Blender execution at iteration
-{iteration}. There are no useful render images, so diagnose the code and log directly.
+    return f"""当前脚本在第 {iteration} 轮确定性校验或 Blender 执行中失败。没有可用的渲染图，因此直接诊断代码和日志。
 
-TARGET SPEC:
+目标规格:
 {spec_json}
 
 {repair_context}
@@ -296,15 +299,15 @@ TARGET SPEC:
 
 {reference_guidance}
 
-CURRENT EXACT SCRIPT:
+当前精确脚本:
 ```python
 {current_script}
 ```
 
-FAILURE EVIDENCE:
+失败证据:
 ```
 {error}
 ```
 
-Make the smallest robust fix and preserve correct geometry.
+做最小且稳健的修复，并保留正确几何。
 """

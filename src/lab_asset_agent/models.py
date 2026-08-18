@@ -146,8 +146,8 @@ class AppConfig(BaseModel):
 
 
 class VisualIssue(BaseModel):
-    review_axis: Literal["camera_coverage", "shape_silhouette", "graduations"] = (
-        "shape_silhouette"
+    review_axis: Literal["camera_coverage", "shape", "graduations"] = (
+        "shape"
     )
     severity: Literal["critical", "major", "moderate", "minor"]
     view_names: list[str] = Field(default_factory=list)

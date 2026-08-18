@@ -60,6 +60,7 @@ class AssetGenerationOrchestrator:
         write_json(run_dir / "spec.json", spec)
         write_json(manifest_path, manifest)
         write_json(run_dir / "issue_history.json", [])
+        self._copy_reference_images(spec, run_dir)
 
         self.console.print(f"[cyan]Run created[/cyan]: {run_dir}")
         self._print_human_hint()
@@ -144,6 +145,7 @@ class AssetGenerationOrchestrator:
         manifest.status = "running"
         manifest.failure_reason = None
         write_json(manifest_path, manifest)
+        self._copy_reference_images(spec, run_dir)
         self.console.print(f"[cyan]Resuming run[/cyan]: {run_dir}")
         self._print_human_hint()
         if previous_failure:
@@ -542,6 +544,15 @@ class AssetGenerationOrchestrator:
             if not path.exists():
                 raise FileNotFoundError(path)
         self.config.paths.runs_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _copy_reference_images(spec: InstrumentSpec, run_dir: Path) -> None:
+        ref_dir = run_dir / "ref_imgs"
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        for image_path in spec.reference_images:
+            image_path = Path(image_path)
+            if image_path.is_file():
+                shutil.copy2(image_path, ref_dir / image_path.name)
 
     def _review_passes(self, review) -> bool:
         return review.verdict == "pass" and review.overall_score >= self.config.loop.pass_score
