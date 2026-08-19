@@ -1,25 +1,16 @@
-# Laboratory Asset Script Contract
+# 实验室资产脚本契约
 
-The model may create or revise exactly one Blender Python instrument script. The shared toolkit, project
-documentation, and reference implementation are immutable context.
+模型只能创建或修改一个 Blender Python 仪器脚本。共享工具库、项目文档和参考实现是不可变上下文。
+生成的脚本必须：
 
-The generated script must:
-
-1. Import `workspace/toolkit/lab_blender_toolkit.py` as `lab` using `LAB_TOOLKIT_DIR` (with a `__file__`-derived fallback).
-2. Define `build_asset() -> bpy.types.Object` and call it under `if __name__ == "__main__":`.
-3. Honor `LAB_ASSET_OUTPUT_DIR`, `LAB_RENDER_ENGINE`, and `LAB_RENDER_RESOLUTION`.
-4. Clear/configure the scene; create separate asset, marking, and studio collections; configure camera and lighting;
-   render at least three diagnostic views; and save a `.blend` file. The views must jointly show the complete
-   object, use meaningfully different angles, and keep silhouette details and graduations inspectable.
-5. Save outputs only below `LAB_ASSET_OUTPUT_DIR` when it is set, and add meaningful metadata to the main asset.
-6. Prefer toolkit functions. Add local helper geometry only when the toolkit lacks the required topology.
-7. Keep physical dimensions explicit and plausible. Use real wall thickness, closed meshes, correct normals, and
-   non-self-intersecting profiles.
-8. When the target describes a capacity, ensure `lab.profile_capacity_ml(inner_profile)` reaches it. Enlarge an
-   undersized inner profile rather than lowering the declared capacity.
-9. Fix actual geometry instead of hiding it through camera, lighting, cropping, exposure, background, or material
-   changes.
-10. Compute vessel graduations from the same inner liquid profile used for capacity. Start integration at the true
-    zero-volume point of the usable cavity, accounting for inner-bottom height and base thickness. Non-uniform
-    equal-volume spacing is correct for non-uniform cross-sections.
-11. For whole-millilitre capacities and intervals, prefer integer literals when calling `add_volume_graduations`.
+1. 使用 `LAB_TOOLKIT_DIR`（并带基于 `__file__` 的回退）导入 `workspace/toolkit/lab_blender_toolkit.py` 为 `lab`。
+2. 定义 `build_asset() -> bpy.types.Object`，并在 `if __name__ == "__main__":` 下调用。
+3. 遵守 `LAB_ASSET_OUTPUT_DIR`、`LAB_RENDER_ENGINE` 和 `LAB_RENDER_RESOLUTION`。
+4. 清空/配置场景；创建独立的资产、标记和影棚集合；配置相机与灯光；至少渲染三个诊断视角；并保存 `.blend` 文件。这些视角必须联合展示完整物体，使用有意义的差异化角度，并让轮廓细节与刻度保持可检查。
+5. 设置 `LAB_ASSET_OUTPUT_DIR` 时，输出只保存到该目录之下，并为主资产添加有意义的元数据。
+6. 优先使用工具库函数；仅在工具库缺少所需拓扑时才添加局部辅助几何。
+7. 保持物理尺寸明确且合理。使用真实壁厚、封闭网格、正确法线和非自相交轮廓。
+8. 当目标描述容量时，确保 `lab.profile_capacity_ml(inner_profile)` 达到该容量。扩大偏小的内部轮廓，而不是降低声明容量。
+9. 修复真实几何，而不是通过相机、灯光、裁剪、曝光、背景或材质变化来掩盖它。
+10. 使用与容量相同的内部液面轮廓计算容器刻度。从可用腔体的真实零体积点开始积分，并考虑内底高度与底部厚度。非均匀横截面下，等体积刻度间距不均是正常现象。
+11. 对于整毫升容量与间隔，调用 `add_volume_graduations` 时优先使用整数字面量。

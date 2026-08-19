@@ -1,35 +1,30 @@
-# Curated Blender 5.2 context for the authoring agent
+# 面向生成 agent 的 Blender 5.2 API精简上下文
 
-This project runs Blender in background mode and executes a Python file. The instrument script is responsible for scene creation, render paths, and saving the `.blend` file.
+本项目在后台模式运行 Blender 并执行一个 Python 文件。仪器脚本负责场景创建、渲染路径以及保存 `.blend` 文件。
 
-## Project-specific facts
+## 项目特定事实
 
-- The supplied toolkit explicitly requires Blender 5.2.
-- Toolkit geometry is expressed in Blender metres; use `lab.mm(value)` for millimetres.
-- `create_hollow_revolved_mesh` builds a closed hollow vessel from outer and inner vertical profiles and supports angular deformation such as a pouring spout.
-- `smooth_profile(profile, samples_per_segment=8, sharp_indices=...)` performs shape-preserving PCHIP contour
-  interpolation. `smooth_profile_from_mm(...)` combines millimetre parsing and smoothing. Use the same smoothed
-  inner profile for mesh construction, capacity, and graduations; preserve intentional base/rim/joint corners with
-  `sharp_indices`.
-- `add_volume_graduations` computes tick heights from the inner-volume profile, then wraps ticks and labels to the actual outer surface.
-- `add_volume_graduations` accepts positive whole-millilitre values, including integer-valued floats such as
-  `250.0`; use integer literals in generated scripts when the specification is a whole number.
-- `configure_scene`, `create_grid_floor`, `create_camera`, `setup_glass_product_lighting`, `render_views`, and `save_blend` form the standard rendering pipeline.
-- `enable_freestyle_outline()` optionally overlays visible silhouettes/open borders in the rendered image. It is a
-  diagnostic aid for geometry visibility, not a geometry fix and not required for clean beauty renders.
-- The reference beaker demonstrates the expected organization, but new instruments may require local helper functions for necks, side arms, handles, stoppers, joints, or non-axisymmetric parts.
+- 提供的工具库明确要求 Blender 5.2。
+- 工具库几何以 Blender 米为单位；使用 `lab.mm(value)` 表示毫米。
+- `create_hollow_revolved_mesh` 根据外部与内部纵向轮廓构建封闭空心容器，并支持诸如倒液嘴的角变形。
+- `smooth_profile(profile, samples_per_segment=8, sharp_indices=...)` 执行保形 PCHIP 轮廓插值。`smooth_profile_from_mm(...)` 结合毫米解析与平滑。网格构建、容量和刻度必须使用同一个平滑后的内部轮廓；用 `sharp_indices` 保留刻意的底部/口沿/接头拐角。
+- `add_volume_graduations` 根据内部容积轮廓计算刻度高度，然后把刻度和标签包裹到实际外表面。
+- `add_volume_graduations` 接受正的整毫升值，包括整数浮点数如 `250.0`；当规格为整数时，生成脚本中优先使用整数字面量。
+- `configure_scene`、`create_grid_floor`、`create_camera`、`setup_glass_product_lighting`、`render_views` 和 `save_blend` 组成标准渲染管线。
+- `enable_freestyle_outline()` 可选地在渲染图中叠加可见轮廓/开放边界。它是几何可见性的诊断辅助，不是几何修复，也不是干净效果渲染的必需项。
+- 参考烧杯演示了预期组织方式，但新仪器可能需要为瓶颈、支管、把手、塞子、接头或非轴对称部件编写局部辅助函数。
 
-## Headless execution constraints
+## 无头执行约束
 
-- Do not depend on UI context, active editor areas, or manual mode changes.
-- Prefer Blender data API and explicit object linking over context-sensitive operators.
-- When operators are necessary, set selection and active object deterministically.
-- Output paths must be absolute or derived from `Path(__file__)` / `LAB_ASSET_OUTPUT_DIR`.
-- A successful script must produce multiple PNG views and a `.blend` file without opening the Blender GUI.
+- 不要依赖 UI 上下文、活动编辑器区域或手动模式切换。
+- 优先使用 Blender 数据 API 和显式对象链接，而不是依赖上下文的操作符。
+- 必须使用操作符时，确定性地设置选中对象和活动对象。
+- 输出路径必须为绝对路径，或从 `Path(__file__)` / `LAB_ASSET_OUTPUT_DIR` 推导。
+- 成功脚本必须在不开 Blender GUI 的情况下生成多张 PNG 视角和一个 `.blend` 文件。
 
-Place additional Blender HTML/text documentation in this directory. The code-writing model receives these files as immutable context.
+可将额外的 Blender HTML/文本说明放在本目录。代码生成模型会把这些文件作为不可变上下文接收。
 
-## Smooth-profile example
+## 平滑轮廓示例
 
 ```python
 OUTER_PROFILE = lab.smooth_profile_from_mm(
@@ -45,12 +40,11 @@ OUTER_PROFILE = lab.smooth_profile_from_mm(
 )
 ```
 
-Use smoothing for curved bellies, shoulders, and neck transitions. Do not smooth across a deliberately sharp flange,
-rim, base corner, or ground-glass joint.
+对曲线腹部、肩部和瓶颈过渡使用平滑。不要对需要尖锐的口沿、底角或磨砂接头进行平滑。
 
-## Optional outline example
+## 可选轮廓线示例
 
-Call this after `configure_scene(...)` and before rendering:
+在 `configure_scene(...)` 之后、渲染之前调用：
 
 ```python
 lab.enable_freestyle_outline(
@@ -60,11 +54,9 @@ lab.enable_freestyle_outline(
 )
 ```
 
-## Required generated-script bootstrap
+## 必需生成脚本引导
 
-A generated file is written into the run directory (`runs/<run-id>/candidate.py`). The immutable toolkit
-lives under `workspace/toolkit/`; locate it through `LAB_TOOLKIT_DIR` rather than assuming the current working
-directory:
+生成的文件写入运行目录（`runs/<run-id>/candidate.py`）。不可变工具库位于 `workspace/toolkit/`；通过 `LAB_TOOLKIT_DIR` 定位它，不要假设当前工作目录：
 
 ```python
 import importlib
@@ -88,5 +80,4 @@ RENDER_ENGINE = os.getenv("LAB_RENDER_ENGINE", "BLENDER_EEVEE")
 RESOLUTION = int(os.getenv("LAB_RENDER_RESOLUTION", "768"))
 ```
 
-Pass `RENDER_ENGINE` and `RESOLUTION` into `lab.configure_scene`, and pass `OUTPUT_DIR` to both
-`lab.render_views` and `lab.save_blend`. Do not write files elsewhere when `LAB_ASSET_OUTPUT_DIR` is set.
+把 `RENDER_ENGINE` 和 `RESOLUTION` 传给 `lab.configure_scene`，并把 `OUTPUT_DIR` 同时传给 `lab.render_views` 和 `lab.save_blend`。设置 `LAB_ASSET_OUTPUT_DIR` 时不要向其他位置写文件。

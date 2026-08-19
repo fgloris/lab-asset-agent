@@ -1,22 +1,22 @@
-# Claude Code Project Notes
+# Claude Code 项目说明
 
-This repository implements a deterministic local orchestration loop rather than using Claude Code as the
-runtime agent. Claude Code may be used to maintain the repository, tests, prompts, and Blender tooling.
+本仓库运行的是确定性的本地编排循环；Claude Code 仅用于维护代码、测试、提示词与 Blender 工具。
 
-Runtime architecture:
+## 编排流程
 
-1. The first script is generated either by DeepSeek or by the configured GPT endpoint (`initial_generator`).
-2. The local process statically validates the script and launches Blender 5.2 in background/offline mode.
-3. Blender writes multiple PNG views and a `.blend` file.
-4. The GPT iteration agent receives the target spec, immutable toolkit/reference/docs, the exact script snapshot
-   that produced the images, and JPEG-base64 render views.
-5. In one response, GPT returns a structured three-axis review and chooses `pass`, `revise`, or `retake_views`.
-   `revise` returns the complete next Blender script; `retake_views` returns a camera-only script revision. Render
-   failures are also repaired by this GPT agent using the exact code and Blender log.
+1. 生成首个脚本：由 `initial_generator`（DeepSeek 或 GPT）生成 `runs/<run_id>/candidate.py`。
+2. 本地静态校验脚本，随后在后台/离线模式启动 Blender 5.2 执行。
+3. Blender 输出多张 PNG 视角与一个 `.blend` 文件。
+4. GPT 迭代 agent（`iteration_agent`）接收目标规格、不可变工具库/参考/文档、精确脚本快照和 JPEG 渲染图。
+5. 单次响应完成三轴评审并选择：
+   - `pass`：通过。
+   - `revise`：返回完整修正脚本，进入下一轮。
+   - `retake_views`：仅返回相机修改脚本，重拍视角。
+   渲染失败时，同一 agent 依据脚本与 Blender 日志修复。
 
-The CLI may inject one human hint from a selected iteration onward. Keep this intervention simple and explicit;
-do not add interactive prompts, file watchers, or background control channels.
+## 维护约束
 
-Do not reintroduce a separate reviewer-to-coder handoff. Do not modify the shared toolkit or reference script
-merely to make a generated asset pass. Keep API keys in environment variables. Tests must never make paid
-network calls.
+- 不要重新引入“评审→编码”的分步交接。
+- 不要为了通过资产而修改共享工具库或参考脚本。
+- API key 放在环境变量。
+- 人工提示保持简单明确，不添加交互提示、文件监听或后台控制通道。

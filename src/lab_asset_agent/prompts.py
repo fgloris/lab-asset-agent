@@ -33,15 +33,16 @@ MATERIAL_VOCABULARY = """根据参考图中的外观和你对仪器的知识，�
 - latex/rubber: 软质橡胶部件（吸耳球、管材、套管）
 - white text / dark text / markings: 用于刻度、标签和标识的平白/平黑材质"""
 
-STRUCTURAL_FIDELITY_RULE = """结构保真（强制）：结构细节必须物理合理。结合你对真实实验室仪器的理解，使每个部件
+STRUCTURAL_FIDELITY_RULE = """当提供参考产品图时，整体形态和比例必须与参考图匹配。仔细观察仪器的整体形态和各个部分的大小比例，然后调整现有模型，确保他们形状基本一致。
+结构细节必须物理合理。结合你对真实实验室仪器的理解，使每个部件
 （口沿、壶嘴、底部、壁、接头、活塞、支管、刻度）正确组合、合理连接，并保持仪器可用且不漏液。表现真实壁厚，
-避免悬浮或自相交几何，不虚构该仪器不可能存在的部件。当提供参考产品图时，整体形态和比例必须与参考图匹配。"""
+避免悬浮或自相交几何，不虚构该仪器不可能存在的部件。"""
 
 RENDER_STANDARD = """渲染标准：至少生成 3 个相机视角，共同展示完整形体比例、轮廓与侧面、口沿与壁厚、底部，
 以及（如存在）刻度位置与可读性。"""
 
 _ASSET_GUIDANCE = "\n\n" + "\n\n".join(
-    (MATERIAL_VOCABULARY, STRUCTURAL_FIDELITY_RULE, RENDER_STANDARD)
+    (STRUCTURAL_FIDELITY_RULE, MATERIAL_VOCABULARY, RENDER_STANDARD)
 )
 
 
@@ -68,7 +69,7 @@ INITIAL_WRITER_SYSTEM_PROMPT = (
 一个完整可执行的 Python 文件，不要使用 Markdown 代码围栏。
 </BLENDER_SCRIPT>
 <SUMMARY>
-一段简洁的设计摘要（可用中文）。
+一段简洁的设计摘要（中文）。
 </SUMMARY>
 
 不要返回补丁，不要修改提供的上下文。通用安全约束：禁止网络访问、子进程、shell 命令、eval、exec
@@ -162,7 +163,7 @@ REVIEW_SYSTEM_PROMPT = (
 
 """
     + _ASSET_GUIDANCE
-    + "\n"
+    + "\n\n"
     + COMMON_SAFETY
 )
 
@@ -258,7 +259,7 @@ REPAIR_SYSTEM_PROMPT = (
 
 """
     + _ASSET_GUIDANCE
-    + "\n"
+    + "\n\n"
     + COMMON_SAFETY
 )
 
