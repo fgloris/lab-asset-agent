@@ -192,7 +192,6 @@ class OpenAICompatibleClient:
         *,
         response_schema: dict[str, Any] | None = None,
         schema_name: str = "response",
-        response_format_mode: str | None = None,
         stream_label: str | None = None,
         stream_output_path: str | Path | None = None,
     ) -> ChatCompletion:
@@ -205,7 +204,7 @@ class OpenAICompatibleClient:
         if self.config.temperature is not None:
             kwargs["temperature"] = self.config.temperature
 
-        formats = self._response_formats(response_schema, schema_name, response_format_mode)
+        formats = self._response_formats(response_schema, schema_name)
         last_format_error: Exception | None = None
 
         for attempt, response_format in enumerate(formats, start=1):
@@ -401,7 +400,6 @@ class OpenAICompatibleClient:
         self,
         response_schema: dict[str, Any] | None,
         schema_name: str,
-        response_format_mode: str | None = None,
     ) -> list[dict[str, Any] | None]:
         if response_schema is None:
             return [None]
@@ -415,16 +413,7 @@ class OpenAICompatibleClient:
             },
         }
         json_object = {"type": "json_object"}
-        mode = response_format_mode or self.config.response_format_mode
-
-        if mode == "json_schema":
-            candidates: list[dict[str, Any] | None] = [strict_schema, json_object, None]
-        elif mode == "json_object":
-            candidates = [json_object, None]
-        elif mode == "text":
-            candidates = [None]
-        else:
-            candidates = [strict_schema, json_object, None]
+        candidates: list[dict[str, Any] | None] = [strict_schema, json_object, None]
 
         unique: list[dict[str, Any] | None] = []
         for candidate in candidates:

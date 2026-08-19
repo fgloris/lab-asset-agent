@@ -45,7 +45,6 @@ class ModelConfig(BaseModel):
     max_retries: int = Field(default=8, ge=0)
     connect_timeout_seconds: float = Field(default=60.0, ge=1.0)
     request_timeout_seconds: float = Field(default=900.0, ge=10.0)
-    response_format_mode: Literal["auto", "json_schema", "json_object", "text"] = "auto"
     stream: bool = True
     stream_to_terminal: bool = True
     stream_reasoning: Literal["hidden", "progress", "full"] = "progress"

@@ -36,7 +36,6 @@ models:
       vision: true
       max_tokens: 12000
       temperature: 0.1
-      response_format_mode: text
 
     deepseek:
       base_url: "https://api.deepseek.com"
@@ -45,7 +44,6 @@ models:
       vision: false
       max_tokens: 12000
       temperature: 0.1
-      response_format_mode: text
 
 loop:
   max_iterations: 20
