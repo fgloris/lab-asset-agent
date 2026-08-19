@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -29,12 +29,17 @@ class BlenderConfig(BaseModel):
     minimum_render_count: int = Field(default=3, ge=1, le=12)
 
 
-class OpenAICompatibleModelConfig(BaseModel):
-    """Configuration shared by any OpenAI-compatible chat-completions endpoint."""
+class ModelConfig(BaseModel):
+    """Configuration for a single OpenAI-compatible model endpoint.
+
+    ``vision`` marks whether the model accepts image inputs. Only a
+    vision-capable model may be selected as ``iterative_generator``.
+    """
 
     base_url: str
     api_key_env: str
     model: str
+    vision: bool = False
     max_tokens: int | None = Field(default=4000, ge=256)
     temperature: float | None = Field(default=0.1, ge=0.0, le=2.0)
     max_retries: int = Field(default=8, ge=0)
@@ -44,65 +49,84 @@ class OpenAICompatibleModelConfig(BaseModel):
     stream: bool = True
     stream_to_terminal: bool = True
     stream_reasoning: Literal["hidden", "progress", "full"] = "progress"
-
-
-class VisionCodeAgentConfig(OpenAICompatibleModelConfig):
     extra_images: int = Field(default=2, ge=0, le=12)
     max_image_side: int = Field(default=1280, ge=256, le=4096)
     jpeg_quality: int = Field(default=90, ge=50, le=100)
 
 
+_SHARED_MODEL_FIELDS = (
+    "stream",
+    "stream_to_terminal",
+    "stream_reasoning",
+    "max_retries",
+    "connect_timeout_seconds",
+    "request_timeout_seconds",
+    "max_image_side",
+    "extra_images",
+    "jpeg_quality",
+)
+
+
 class ModelsConfig(BaseModel):
-    """Model routing.
+    """Model routing via named providers.
 
-    ``initial_generator`` controls only the first script. Every render review,
-    visual revision, and render-error repair is handled by ``iteration_agent``.
-
-    Old v0.2 configuration keys (``code_writer`` and ``visual_reviewer``) are
-    accepted and migrated automatically so existing config.yaml files still load.
+    Shared transport/streaming/image settings live here and are applied to
+    every provider unless that provider overrides them. ``iterative_generator``
+    must be vision-capable.
     """
 
-    initial_generator: Literal["deepseek", "gpt"] = "deepseek"
-    initial_writer: OpenAICompatibleModelConfig | None = None
-    iteration_agent: VisionCodeAgentConfig
+    initial_generator: str
+    iterative_generator: str
+    providers: dict[str, ModelConfig]
+
+    stream: bool = True
+    stream_to_terminal: bool = True
+    stream_reasoning: Literal["hidden", "progress", "full"] = "progress"
+    max_retries: int = Field(default=8, ge=0)
+    connect_timeout_seconds: float = Field(default=60.0, ge=1.0)
+    request_timeout_seconds: float = Field(default=900.0, ge=10.0)
+    max_image_side: int = Field(default=1280, ge=256, le=4096)
+    extra_images: int = Field(default=2, ge=0, le=12)
+    jpeg_quality: int = Field(default=90, ge=50, le=100)
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_v02_keys(cls, value: Any) -> Any:
+    def apply_shared_settings(cls, value: object) -> object:
         if not isinstance(value, dict):
             return value
         data = dict(value)
-        if "initial_writer" not in data and "code_writer" in data:
-            data["initial_writer"] = data["code_writer"]
-        if "iteration_agent" not in data and "visual_reviewer" in data:
-            migrated = dict(data["visual_reviewer"])
-            # v0.2 visual review needed only a small JSON response; v0.3 may
-            # return a complete Python file, so preserve compatibility with a
-            # safer output budget and timeout. No response_format is sent.
-            current_tokens = migrated.get("max_tokens")
-            if current_tokens is None or int(current_tokens) < 12000:
-                migrated["max_tokens"] = 12000
-            current_timeout = migrated.get("request_timeout_seconds")
-            if current_timeout is None or int(current_timeout) < 600:
-                migrated["request_timeout_seconds"] = 600
-            migrated["response_format_mode"] = "text"
-            data["iteration_agent"] = migrated
+        providers = data.get("providers")
+        if not isinstance(providers, dict):
+            return data
+        for provider in providers.values():
+            if isinstance(provider, dict):
+                for key in _SHARED_MODEL_FIELDS:
+                    if key in data:
+                        provider.setdefault(key, data[key])
         return data
 
     @model_validator(mode="after")
-    def validate_initial_route(self) -> "ModelsConfig":
-        if self.initial_generator == "deepseek" and self.initial_writer is None:
+    def validate_routes(self) -> "ModelsConfig":
+        unknown = [
+            name
+            for name in (self.initial_generator, self.iterative_generator)
+            if name not in self.providers
+        ]
+        if unknown:
+            raise ValueError(f"Unknown model source(s): {', '.join(unknown)}")
+        if not self.providers[self.iterative_generator].vision:
             raise ValueError(
-                "models.initial_writer is required when initial_generator=deepseek."
+                "models.iterative_generator must reference a model with vision: true."
             )
         return self
 
     @property
-    def initial_model(self) -> OpenAICompatibleModelConfig:
-        if self.initial_generator == "gpt":
-            return self.iteration_agent
-        assert self.initial_writer is not None
-        return self.initial_writer
+    def initial_model(self) -> ModelConfig:
+        return self.providers[self.initial_generator]
+
+    @property
+    def iterative_model(self) -> ModelConfig:
+        return self.providers[self.iterative_generator]
 
 
 class LoopConfig(BaseModel):

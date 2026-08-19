@@ -184,31 +184,27 @@ def batch(
 
 @app.command("ping")
 def ping(
-    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", exists=True, dir_okay=False),
-    model: str = typer.Option(
-        "iteration",
-        "--model",
-        "-m",
-        help="Which configured endpoint to ping: 'iteration' (default) or 'initial'.",
+    model: str = typer.Argument(
+        None,
+        help="Model source name from models.providers (default: iterative_generator).",
     ),
+    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", exists=True, dir_okay=False),
 ) -> None:
-    """Send a one-word hello to a configured API to verify connectivity."""
+    """Send a one-word hello to a configured model source to verify connectivity."""
     cfg = load_config(config)
-    if model == "iteration":
-        model_cfg = cfg.models.iteration_agent
-        label = "iteration_agent"
-    elif model == "initial":
-        model_cfg = cfg.models.initial_model
-        label = "initial"
-    else:
-        raise typer.BadParameter("--model must be 'iteration' or 'initial'")
+    name = model or cfg.models.iterative_generator
+    if name not in cfg.models.providers:
+        raise typer.BadParameter(
+            f"Unknown model source '{name}'. Available: {', '.join(cfg.models.providers)}"
+        )
+    model_cfg = cfg.models.providers[name]
 
     from .openai_compatible import OpenAICompatibleClient
 
     async def _ping() -> str:
         completion = await OpenAICompatibleClient(model_cfg).chat(
             [{"role": "user", "content": "Say hello."}],
-            stream_label=f"{label}: {model_cfg.model}",
+            stream_label=f"{name}: {model_cfg.model}",
         )
         return completion.text
 
@@ -229,20 +225,19 @@ def check_config(
     table.add_row("Reference", str(cfg.paths.reference), str(cfg.paths.reference.exists()))
     table.add_row("Docs", str(cfg.paths.docs_dir), str(cfg.paths.docs_dir.exists()))
     table.add_row("Rules", str(cfg.paths.rules), str(cfg.paths.rules.exists()))
-    initial = cfg.models.initial_model
-    table.add_row(
-        "Initial generator",
-        f"{cfg.models.initial_generator}: {initial.model} @ {initial.base_url}",
-        f"env {initial.api_key_env}: "
-        + ("set" if os.getenv(initial.api_key_env) else "missing"),
-    )
-    agent = cfg.models.iteration_agent
-    table.add_row(
-        "GPT iteration agent",
-        f"{agent.model} @ {agent.base_url}",
-        f"env {agent.api_key_env}: "
-        + ("set" if os.getenv(agent.api_key_env) else "missing"),
-    )
+    for name, model_cfg in cfg.models.providers.items():
+        roles = []
+        if name == cfg.models.initial_generator:
+            roles.append("initial")
+        if name == cfg.models.iterative_generator:
+            roles.append("iterative")
+        role_text = f" ({', '.join(roles)})" if roles else ""
+        table.add_row(
+            f"Model {name}{role_text}",
+            f"{model_cfg.model} @ {model_cfg.base_url} (vision={model_cfg.vision})",
+            f"env {model_cfg.api_key_env}: "
+            + ("set" if os.getenv(model_cfg.api_key_env) else "missing"),
+        )
     console.print(table)
 
 

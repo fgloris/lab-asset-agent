@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import require_env
-from .models import OpenAICompatibleModelConfig, TokenUsage
+from .models import ModelConfig, TokenUsage
 
 
 @dataclass
@@ -157,7 +157,7 @@ class OpenAICompatibleClient:
 
     def __init__(
         self,
-        config: OpenAICompatibleModelConfig,
+        config: ModelConfig,
         *,
         client: Any | None = None,
     ) -> None:

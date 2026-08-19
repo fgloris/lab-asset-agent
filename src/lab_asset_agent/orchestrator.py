@@ -31,7 +31,7 @@ class AssetGenerationOrchestrator:
         self.config = config
         self.console = console or Console()
         self.blender = BlenderRunner(config)
-        self.iteration_agent = VisionCodingAgent(config)
+        self.iterative_agent = VisionCodingAgent(config)
         self.human_hint = human_hint.strip() if human_hint and human_hint.strip() else None
 
     async def run(self, spec: InstrumentSpec) -> RunManifest:
@@ -61,18 +61,18 @@ class AssetGenerationOrchestrator:
         self.console.print(f"[cyan]Run created[/cyan]: {run_dir}")
         self._print_human_hint()
         protected = self._snapshot_protected_files()
-        initial_writer = CodeWriter(self.config, self.config.models.initial_model)
+        initial_agent = CodeWriter(self.config, self.config.models.initial_model)
         initial_started = False
         agent_started = False
         try:
-            await initial_writer.start()
+            await initial_agent.start()
             initial_started = True
             route = self.config.models.initial_generator
             model = self.config.models.initial_model.model
             self.console.print(
                 f"[cyan]Calling initial generator[/cyan]: {model} (route={route})..."
             )
-            writer_summary, initial_usage = await initial_writer.create_initial(
+            writer_summary, initial_usage = await initial_agent.create_initial(
                 spec, candidate_path, reference_images=spec.reference_images
             )
             manifest.token_usage.add(initial_usage)
@@ -80,7 +80,7 @@ class AssetGenerationOrchestrator:
             self.console.print(f"[green]Initial script saved[/green]: {candidate_path}")
             self._restore_protected_files(protected)
 
-            await self.iteration_agent.start()
+            await self.iterative_agent.start()
             agent_started = True
             return await self._iterate(
                 spec=spec,
@@ -98,16 +98,16 @@ class AssetGenerationOrchestrator:
             raise
         finally:
             if initial_started:
-                await initial_writer.close()
+                await initial_agent.close()
             if agent_started:
-                await self.iteration_agent.close()
+                await self.iterative_agent.close()
             self._restore_protected_files(protected)
 
     async def resume(self, run_dir: Path, from_iteration: int | None = None) -> RunManifest:
         """Resume without repeating a completed initial-generation request.
 
         v0.2 manifests are supported. If an old run has renders and a separate
-        review but no revised candidate, the new GPT iteration agent receives the
+        review but no revised candidate, the iterative generator receives the
         exact script plus those renders and performs review+revision in one call.
         """
 
@@ -160,7 +160,7 @@ class AssetGenerationOrchestrator:
         protected = self._snapshot_protected_files()
         agent_started = False
         try:
-            await self.iteration_agent.start()
+            await self.iterative_agent.start()
             agent_started = True
 
             repeated_hashes = {record.script_sha256 for record in manifest.iterations}
@@ -213,10 +213,10 @@ class AssetGenerationOrchestrator:
                         )
                     self.console.print(
                         f"[cyan]Calling GPT review+coder[/cyan]: "
-                        f"{self.config.models.iteration_agent.model} with code and "
+                        f"{self.config.models.iterative_model.model} with code and "
                         f"{len(last.render.images)} existing image(s)..."
                     )
-                    decision = await self.iteration_agent.review_and_revise(
+                    decision = await self.iterative_agent.review_and_revise(
                         spec,
                         self._record_script_path(run_dir, last),
                         last.render.images,
@@ -231,16 +231,16 @@ class AssetGenerationOrchestrator:
                     if self._review_passes(decision.review):
                         self._finalize_passed(run_dir, spec, manifest, last)
                         return manifest
-                    self.iteration_agent.write_revision(decision, candidate_path)
+                    self.iterative_agent.write_revision(decision, candidate_path)
                     writer_summary = decision.summary
                     self._print_revision_saved(decision)
                     self._restore_protected_files(protected)
                 else:
                     self.console.print(
                         f"[cyan]Calling GPT repair agent[/cyan]: "
-                        f"{self.config.models.iteration_agent.model} with code and Blender log..."
+                        f"{self.config.models.iterative_model.model} with code and Blender log..."
                     )
-                    repair = await self.iteration_agent.repair_render_failure(
+                    repair = await self.iterative_agent.repair_render_failure(
                         spec,
                         self._record_script_path(run_dir, last),
                         last.iteration,
@@ -290,7 +290,7 @@ class AssetGenerationOrchestrator:
             raise
         finally:
             if agent_started:
-                await self.iteration_agent.close()
+                await self.iterative_agent.close()
             self._restore_protected_files(protected)
 
     async def _iterate(
@@ -358,9 +358,9 @@ class AssetGenerationOrchestrator:
                     break
                 self.console.print(
                     f"[cyan]Calling GPT repair agent[/cyan]: "
-                    f"{self.config.models.iteration_agent.model} with current code and Blender log..."
+                    f"{self.config.models.iterative_model.model} with current code and Blender log..."
                 )
-                repair = await self.iteration_agent.repair_render_failure(
+                repair = await self.iterative_agent.repair_render_failure(
                     spec,
                     script_snapshot,
                     iteration,
@@ -384,10 +384,10 @@ class AssetGenerationOrchestrator:
             consecutive_render_failures = 0
             self.console.print(
                 f"[cyan]Calling GPT review+coder[/cyan]: "
-                f"{self.config.models.iteration_agent.model} with exact code and "
+                f"{self.config.models.iterative_model.model} with exact code and "
                 f"{len(render.images)} image(s)..."
             )
-            decision = await self.iteration_agent.review_and_revise(
+            decision = await self.iterative_agent.review_and_revise(
                 spec,
                 script_snapshot,
                 render.images,
@@ -405,7 +405,7 @@ class AssetGenerationOrchestrator:
                 self._finalize_passed(run_dir, spec, manifest, record)
                 break
 
-            self.iteration_agent.write_revision(decision, candidate_path)
+            self.iterative_agent.write_revision(decision, candidate_path)
             writer_summary = decision.summary
             self._print_revision_saved(decision)
             self._restore_protected_files(protected)

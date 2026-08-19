@@ -76,7 +76,7 @@ def build_reference_pairing_guidance(pair_count: int, extra_count: int) -> str:
 
 # ===========================================================================
 # 首版脚本生成（code_writer.CodeWriter）
-# 注入时机：generate 开始时，initial_generator（deepseek 或 gpt）调用一次。
+# 注入时机：generate 开始时，initial_generator 调用一次。
 # ===========================================================================
 
 INITIAL_WRITER_SYSTEM_PROMPT = (
@@ -136,7 +136,7 @@ def build_initial_prompt(
 
 # ===========================================================================
 # 评审 + 改代码（vision_coding_agent.VisionCodingAgent.review_and_revise）
-# 注入时机：每次 Blender 成功渲染后，给 iteration_agent 的多模态请求。
+# 注入时机：每次 Blender 成功渲染后，给 iterative_generator 的多模态请求。
 # ===========================================================================
 
 REVIEW_SYSTEM_PROMPT = (
@@ -263,7 +263,7 @@ def build_review_prompt(
 
 # ===========================================================================
 # 渲染失败修复（vision_coding_agent.VisionCodingAgent.repair_render_failure）
-# 注入时机：静态校验或 Blender 执行失败时，给 iteration_agent 的修复请求。
+# 注入时机：静态校验或 Blender 执行失败时，给 iterative_generator 的修复请求。
 # ===========================================================================
 
 REPAIR_SYSTEM_PROMPT = (

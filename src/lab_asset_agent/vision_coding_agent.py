@@ -72,7 +72,7 @@ class VisionCodingAgent:
         client: OpenAICompatibleClient | None = None,
     ) -> None:
         self.config = config
-        self.model_config = config.models.iteration_agent
+        self.model_config = config.models.iterative_model
         self.client = client or OpenAICompatibleClient(self.model_config)
         self.toolkit = ""
         self.docs = ""
@@ -104,7 +104,7 @@ class VisionCodingAgent:
         reference_images: list[Path] = (),
     ) -> VisionCodeDecision:
         if not images:
-            raise ValueError("No render images were supplied to the GPT iteration agent.")
+            raise ValueError("No render images were supplied to the iterative generator.")
         selected = list(images)
         reference_images = list(reference_images)
         pair_count = min(len(selected), len(reference_images))

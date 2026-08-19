@@ -29,7 +29,7 @@ GPT：规格 + 工具代码 + 当前精确代码 + 多视角图片
 | 命令 | 作用 | 最小示例 |
 | --- | --- | --- |
 | `check-config` | 不调用付费 API，校验配置、路径与密钥 | `lab-asset-agent check-config -c config.yaml` |
-| `ping` | 发送一句 hello，验证配置中的模型 API 是否可联通（会消耗少量 token） | `lab-asset-agent ping -c config.yaml` |
+| `ping` | 发送一句 hello，验证指定模型源是否可联通（会消耗少量 token） | `lab-asset-agent ping vectorengine -c config.yaml` |
 | `generate` | 生成单个仪器（初始模型 → Blender → GPT 迭代） | `lab-asset-agent generate desc_dataset/specs/erlenmeyer_250ml.yaml` |
 | `resume` | 续跑中断的 run，不重复已完成的首版生成 | `lab-asset-agent resume` |
 | `batch` | 顺序批量生成一个目录下所有 YAML 规格 | `lab-asset-agent batch desc_dataset/common_chemistry_instruments_yaml` |
@@ -53,7 +53,7 @@ pip install -e ".[dev]"
 
 ```bash
 export VECTOR_ENGINE_API_KEY="sk-..."
-export DEEPSEEK_API_KEY="sk-..."   # 仅当 initial_generator: deepseek 时需要
+export DEEPSEEK_API_KEY="sk-..."   # 仅当 initial_generator 指向 deepseek 时需要
 ```
 
 ## 2. 配置
@@ -69,15 +69,31 @@ blender:
   minimum_render_count: 3
 
 models:
-  initial_generator: gpt        # gpt | deepseek，只决定第一版脚本由谁生成
-  initial_writer:               # initial_generator=deepseek 时必填
-    base_url: "https://api.deepseek.com"
-    api_key_env: DEEPSEEK_API_KEY
-    model: deepseek-reasoner
-  iteration_agent:              # 首轮渲染之后唯一使用的模型
-    base_url: "https://api.vectorengine.ai/v1"
-    api_key_env: VECTOR_ENGINE_API_KEY
-    model: gpt-5.6-luna
+  initial_generator: vectorengine   # 首版脚本由哪个模型源生成
+  iterative_generator: vectorengine # 之后评审/改代码/修复由哪个模型源执行，必须 vision: true
+
+  # 所有模型源共享的连接/流式/图片设置
+  stream: true
+  stream_to_terminal: true
+  stream_reasoning: progress
+  max_retries: 8
+  connect_timeout_seconds: 120
+  request_timeout_seconds: 900
+  max_image_side: 1280
+  extra_images: 2
+  jpeg_quality: 90
+
+  providers:
+    vectorengine:
+      base_url: "https://api.vectorengine.ai/v1"
+      api_key_env: VECTOR_ENGINE_API_KEY
+      model: gpt-5.6-luna
+      vision: true
+    deepseek:
+      base_url: "https://api.deepseek.com"
+      api_key_env: DEEPSEEK_API_KEY
+      model: deepseek-reasoner
+      vision: false
 
 loop:
   max_iterations: 8
@@ -96,8 +112,9 @@ paths:
 
 要点：
 
-- **只有第一版脚本**受 `initial_generator` 控制。首轮渲染之后，评审、改代码、修复 Blender 报错全部由 `iteration_agent` 完成。
-- `iteration_agent` 的 `stream: true` / `stream_to_terminal: true` 会实时把模型响应打印到终端并同步写入 `.partial.txt` 文件；`stream_reasoning: progress`（默认）只显示已接收字符数，`full` 打印完整推理，`hidden` 只打印最终脚本。
+- **只有第一版脚本**受 `initial_generator` 控制。首轮渲染之后，评审、改代码、修复 Blender 报错全部由 `iterative_generator` 完成。
+- 每个 `providers` 条目是一个模型源；`vision: true` 表示该模型支持图像输入，只有支持视觉的模型源才能作为 `iterative_generator`。
+- `stream` / `stream_to_terminal` / `stream_reasoning` 以及连接、超时、图片尺寸等是共享设置，放在 `models` 外层，自动应用到所有模型源；如需单独覆盖，也可在某个 provider 下重写。
 - 工具库和参考脚本是**受保护文件**，运行结束会自动校验并恢复，不会被模型改动。
 
 ## 3. 检查配置：check-config
@@ -115,22 +132,23 @@ lab-asset-agent check-config -c config.yaml
 | Project root        | /home/.../lab_asset_agent   | True   |
 | Blender             | blender                  | not probed |
 | Toolkit             | /home/.../lab_blender_toolkit.py | True |
-| Initial generator   | gpt: gpt-5.6-luna @ ...  | env VECTOR_ENGINE_API_KEY: set |
-| GPT iteration agent | gpt-5.6-luna @ ...       | env VECTOR_ENGINE_API_KEY: set |
+| Model vectorengine (initial, iterative) | gpt-5.6-luna @ ... (vision=True) | env VECTOR_ENGINE_API_KEY: set |
+| Model deepseek                           | deepseek-reasoner @ ... (vision=False) | env DEEPSEEK_API_KEY: set |
 ```
 
 ### 3.1 测试 API 连通性：ping
 
-`ping` 会向配置中的模型 API 发送一句 `Say hello.`，并打印返回内容，用于验证密钥与网络是否可用。这会消耗少量 token：
+`ping` 会向指定模型源发送一句 `Say hello.`，并打印返回内容，用于验证密钥与网络是否可用。这会消耗少量 token。传入 `providers` 里的模型源名即可：
+
+```bash
+lab-asset-agent ping vectorengine -c config.yaml
+lab-asset-agent ping deepseek -c config.yaml
+```
+
+省略模型名时，默认测试 `iterative_generator` 指向的模型源：
 
 ```bash
 lab-asset-agent ping -c config.yaml
-```
-
-默认测试 `iteration_agent`；用 `-m initial` 测试 `initial_generator` 当前路由到的模型（`gpt` 时仍为 `iteration_agent`，`deepseek` 时为 `initial_writer`）：
-
-```bash
-lab-asset-agent ping -c config.yaml -m initial
 ```
 
 ## 4. 生成单个仪器：generate
@@ -151,7 +169,7 @@ lab-asset-agent generate desc_dataset/specs/beaker_low_250ml.yaml
 
 ```text
 Run created: runs/20260802T..._erlenmeyer_250ml
-Calling initial generator: gpt-5.6-luna (route=gpt)...
+Calling initial generator: gpt-5.6-luna (route=vectorengine)...
 [lab-asset-agent] --- response stream ---
 <BLENDER_SCRIPT>...脚本逐步出现...</BLENDER_SCRIPT>
 Initial script saved: runs/20260802T..._erlenmeyer_250ml/candidate.py
@@ -298,7 +316,7 @@ src/lab_asset_agent/prompts.py
 
 | Prompt | 角色 | 注入时机 |
 | --- | --- | --- |
-| `INITIAL_WRITER_SYSTEM_PROMPT` | system | 第一版脚本调用（`CodeWriter`），由 `initial_generator: deepseek/gpt` 指定的模型执行 |
+| `INITIAL_WRITER_SYSTEM_PROMPT` | system | 第一版脚本调用（`CodeWriter`），由 `initial_generator` 指定的模型源执行 |
 | `build_shared_context()` | user 片段 | 脚本契约 + 项目文档 + 参考脚本 + 共享工具库 |
 | `build_initial_prompt()` | user | 目标规格 + 上述上下文 + 生成脚本路径 |
 

@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from .models import AppConfig, InstrumentSpec, OpenAICompatibleModelConfig, TokenUsage
+from .models import AppConfig, InstrumentSpec, ModelConfig, TokenUsage
 from .openai_compatible import OpenAICompatibleClient
 from .prompts import (
     INITIAL_WRITER_SYSTEM_PROMPT,
@@ -26,7 +26,7 @@ class CodeWriter:
     def __init__(
         self,
         config: AppConfig,
-        model_config: OpenAICompatibleModelConfig | None = None,
+        model_config: ModelConfig | None = None,
         *,
         client: OpenAICompatibleClient | None = None,
     ) -> None:
@@ -61,9 +61,8 @@ class CodeWriter:
         reference_images: list[Path] = (),
     ) -> tuple[str, TokenUsage]:
         reference_images = list(reference_images)
-        # DeepSeek has no vision route, so reference images only reach the GPT
-        # initial generator (which is also the iteration agent's vision config).
-        send_images = self.config.models.initial_generator == "gpt" and bool(reference_images)
+        # Reference images only reach a vision-capable initial generator.
+        send_images = self.model_config.vision and bool(reference_images)
         prompt = build_initial_prompt(
             spec_json=json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2),
             shared_context=build_shared_context(
