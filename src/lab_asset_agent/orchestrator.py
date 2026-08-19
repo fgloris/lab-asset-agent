@@ -530,21 +530,38 @@ class AssetGenerationOrchestrator:
         if from_iteration < 1:
             raise ValueError("from_iteration must be at least 1.")
         keep = [record for record in manifest.iterations if record.iteration <= from_iteration]
-        if len(keep) == len(manifest.iterations):
-            return
         snapshot = run_dir / f"iteration_{from_iteration:02d}" / "instrument.py"
         if not snapshot.is_file():
             raise FileNotFoundError(
                 f"Cannot rewind to iteration {from_iteration}: missing {snapshot}"
             )
-        dropped = len(manifest.iterations) - len(keep)
-        manifest.iterations = keep
+
+        dropped = [record for record in manifest.iterations if record.iteration > from_iteration]
+        if dropped:
+            manifest.iterations = keep
+            write_json(run_dir / "manifest.json", manifest)
+            for record in dropped:
+                iteration_dir = run_dir / f"iteration_{record.iteration:02d}"
+                if iteration_dir.is_dir():
+                    shutil.rmtree(iteration_dir)
+
         shutil.copy2(snapshot, candidate_path)
-        write_json(run_dir / "manifest.json", manifest)
-        self.console.print(
-            f"[yellow]Rewound to iteration {from_iteration}[/yellow]: "
-            f"restored candidate from {snapshot} and dropped {dropped} later record(s)."
-        )
+        # Discard the stale revision generated after iteration n so resume will
+        # re-review iteration n and produce a fresh next script instead of
+        # recovering the old one.
+        stale_next = run_dir / f"iteration_{from_iteration:02d}" / "next_instrument.py"
+        stale_next.unlink(missing_ok=True)
+
+        if dropped:
+            self.console.print(
+                f"[yellow]Rewound to iteration {from_iteration}[/yellow]: "
+                f"restored candidate from {snapshot} and dropped "
+                f"{len(dropped)} later record(s)."
+            )
+        else:
+            self.console.print(
+                f"[yellow]Restored candidate from iteration {from_iteration}[/yellow]: {snapshot}"
+            )
 
     def _restore_candidate_if_missing(
         self,
