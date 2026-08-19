@@ -2,9 +2,9 @@
 
 本项目在后台模式运行 Blender 并执行一个 Python 文件。仪器脚本负责场景创建、渲染路径以及保存 `.blend` 文件。
 
-## 项目特定事实
+## 总体API情况
 
-- 提供的工具库明确要求 Blender 5.2。
+- 提供的工具库明确要求 Blender 5.2，请使用与之对应的API。
 - 工具库几何以 Blender 米为单位；使用 `lab.mm(value)` 表示毫米。
 - `create_hollow_revolved_mesh` 根据外部与内部纵向轮廓构建封闭空心容器，并支持诸如倒液嘴的角变形。
 - `smooth_profile(profile, samples_per_segment=8, sharp_indices=...)` 执行保形 PCHIP 轮廓插值。`smooth_profile_from_mm(...)` 结合毫米解析与平滑。网格构建、容量和刻度必须使用同一个平滑后的内部轮廓；用 `sharp_indices` 保留刻意的底部/口沿/接头拐角。
@@ -14,7 +14,7 @@
 - `enable_freestyle_outline()` 可选地在渲染图中叠加可见轮廓/开放边界。它是几何可见性的诊断辅助，不是几何修复，也不是干净效果渲染的必需项。
 - 参考烧杯演示了预期组织方式，但新仪器可能需要为瓶颈、支管、把手、塞子、接头或非轴对称部件编写局部辅助函数。
 
-## 无头执行约束
+## blender headless 执行约束
 
 - 不要依赖 UI 上下文、活动编辑器区域或手动模式切换。
 - 优先使用 Blender 数据 API 和显式对象链接，而不是依赖上下文的操作符。
@@ -42,19 +42,19 @@ OUTER_PROFILE = lab.smooth_profile_from_mm(
 
 对曲线腹部、肩部和瓶颈过渡使用平滑。不要对需要尖锐的口沿、底角或磨砂接头进行平滑。
 
-## 可选轮廓线示例
+## 轮廓线渲染示例
 
-在 `configure_scene(...)` 之后、渲染之前调用：
+此功能可以使渲染出的图像更加清晰。在 `configure_scene(...)` 之后、渲染之前调用：
 
 ```python
 lab.enable_freestyle_outline(
-    thickness_px=1.25,
+    thickness_px=2.5,
     include_open_borders=True,
     include_creases=False,
 )
 ```
 
-## 必需生成脚本引导
+## 文件路径相关
 
 生成的文件写入运行目录（`runs/<run-id>/candidate.py`）。不可变工具库位于 `workspace/toolkit/`；通过 `LAB_TOOLKIT_DIR` 定位它，不要假设当前工作目录：
 
