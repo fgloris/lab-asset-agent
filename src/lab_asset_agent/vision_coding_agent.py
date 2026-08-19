@@ -16,6 +16,7 @@ from .prompts import (
     build_repair_context,
     build_repair_prompt,
     build_reference_image_guidance,
+    build_reference_pairing_guidance,
     build_revision_context,
     build_review_prompt,
 )
@@ -78,16 +79,37 @@ class VisionCodingAgent:
         human_hint: str | None = None,
         reference_images: list[Path] = (),
     ) -> VisionCodeDecision:
-        selected = self._select_images(images)
-        reference_images = list(reference_images)[: self.model_config.max_images]
-        image_labels = [
-            f"图{index}: 当前渲染视角 {path.name}"
-            for index, path in enumerate(selected, start=1)
-        ]
-        image_labels += [
-            f"图{index}: 参考产品图 {path.name}"
-            for index, path in enumerate(reference_images, start=len(image_labels) + 1)
-        ]
+        if not images:
+            raise ValueError("No render images were supplied to the GPT iteration agent.")
+        selected = list(images)
+        reference_images = list(reference_images)
+        pair_count = min(len(selected), len(reference_images))
+
+        if pair_count:
+            paired_renders = selected[:pair_count]
+            paired_refs = reference_images[:pair_count]
+            extra_renders = selected[pair_count:][: self.model_config.extra_images]
+            ordered_images: list[Path] = []
+            image_labels: list[str] = []
+            for ref_path, render_path in zip(paired_refs, paired_renders):
+                ordered_images.append(ref_path)
+                image_labels.append(f"图{len(image_labels) + 1}: 目标参考图 {ref_path.name}")
+                ordered_images.append(render_path)
+                image_labels.append(f"图{len(image_labels) + 1}: 当前渲染视角 {render_path.name}")
+            for render_path in extra_renders:
+                ordered_images.append(render_path)
+                image_labels.append(f"图{len(image_labels) + 1}: 辅助渲染视角 {render_path.name}")
+            reference_guidance = build_reference_pairing_guidance(
+                pair_count, len(extra_renders)
+            )
+        else:
+            ordered_images = selected
+            image_labels = [
+                f"图{index}: 当前渲染视角 {path.name}"
+                for index, path in enumerate(selected, start=1)
+            ]
+            reference_guidance = build_reference_image_guidance(reference_images)
+
         content: list[dict] = [
             {
                 "type": "text",
@@ -103,25 +125,12 @@ class VisionCodingAgent:
                     ),
                     issue_history_context=build_issue_history_context(issue_history or []),
                     human_hint_context=build_human_hint_context(human_hint),
-                    reference_guidance=build_reference_image_guidance(reference_images),
+                    reference_guidance=reference_guidance,
                     script=script_path.read_text(encoding="utf-8"),
                 ),
             }
         ]
-        for image_path in selected:
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": image_data_url(
-                            image_path,
-                            max_side=self.model_config.max_image_side,
-                            jpeg_quality=self.model_config.jpeg_quality,
-                        )
-                    },
-                }
-            )
-        for image_path in reference_images:
+        for image_path in ordered_images:
             content.append(
                 {
                     "type": "image_url",
@@ -164,7 +173,7 @@ class VisionCodingAgent:
         human_hint: str | None = None,
         reference_images: list[Path] = (),
     ) -> ScriptRepair:
-        reference_images = list(reference_images)[: self.model_config.max_images]
+        reference_images = list(reference_images)
         prompt = build_repair_prompt(
             iteration=iteration,
             spec_json=json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2),
@@ -289,17 +298,4 @@ class VisionCodingAgent:
             summary=summary,
             raw_response=text,
         )
-
-    def _select_images(self, images: list[Path]) -> list[Path]:
-        if not images:
-            raise ValueError("No render images were supplied to the GPT iteration agent.")
-        if len(images) <= self.model_config.max_images:
-            return images
-        if self.model_config.max_images == 1:
-            return [images[len(images) // 2]]
-        last = len(images) - 1
-        indices = sorted(
-            {round(i * last / (self.model_config.max_images - 1)) for i in range(self.model_config.max_images)}
-        )
-        return [images[index] for index in indices]
 

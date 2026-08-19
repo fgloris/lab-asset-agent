@@ -64,8 +64,6 @@ class CodeWriter:
         # DeepSeek has no vision route, so reference images only reach the GPT
         # initial generator (which is also the iteration agent's vision config).
         send_images = self.config.models.initial_generator == "gpt" and bool(reference_images)
-        if send_images:
-            reference_images = reference_images[: self.model_config.max_images]
         prompt = build_initial_prompt(
             spec_json=json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2),
             shared_context=build_shared_context(

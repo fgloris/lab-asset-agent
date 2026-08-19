@@ -47,7 +47,7 @@ class OpenAICompatibleModelConfig(BaseModel):
 
 
 class VisionCodeAgentConfig(OpenAICompatibleModelConfig):
-    max_images: int = Field(default=4, ge=1, le=12)
+    extra_images: int = Field(default=2, ge=0, le=12)
     max_image_side: int = Field(default=1280, ge=256, le=4096)
     jpeg_quality: int = Field(default=90, ge=50, le=100)
 

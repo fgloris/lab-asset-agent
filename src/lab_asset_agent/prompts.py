@@ -57,6 +57,23 @@ def build_reference_image_guidance(paths: Sequence[Path]) -> str:
     )
 
 
+def build_reference_pairing_guidance(pair_count: int, extra_count: int) -> str:
+    """评审用硬性对齐目标：前 k 对图逐个对齐，辅助视角仅补充覆盖。"""
+    if pair_count <= 0:
+        return ""
+    lines = [
+        f"硬性对齐目标：本次图片按「目标参考图 → 当前渲染视角」成对排列，共 {pair_count} 对。",
+        f"前 {pair_count} 个当前渲染视角必须分别与对应顺序的目标参考图在整体轮廓、比例和部件布局上尽量接近，"
+        "这是 shape 评分与是否 revise 的首要依据。",
+    ]
+    if extra_count:
+        lines.append(
+            f"随后附带的 {extra_count} 个辅助渲染视角仅用于补充覆盖信息，不参与对齐目标。"
+        )
+    lines.append("只对齐结构和比例；忽略照片的光照、背景、反射和商业修饰，不要把商标画上。")
+    return "\n".join(lines)
+
+
 # ===========================================================================
 # 首版脚本生成（code_writer.CodeWriter）
 # 注入时机：generate 开始时，initial_generator（deepseek 或 gpt）调用一次。
@@ -127,8 +144,8 @@ REVIEW_SYSTEM_PROMPT = (
 只报告可执行的 `moderate`、`major`、`critical` 问题；省略 minor 观察和外观偏好。每个问题必须使用且只能使用
 一个 review_axis：
 
-- `camera_coverage`：可见性门槛，如需要调整则会应优先执行。检查整体覆盖、有效角度多样性和可读比例。若视角存在不足，选择
-`retake_views`；不要因为物体没有拍全，就认为其有几何缺失。
+- `camera_coverage`：可见性门槛，如需要调整则会应优先执行。首先确保前面的渲染视角必须分别与对应顺序的目标参考图一致，然后检查整体覆盖、有效角度多样性和可读比例。
+若视角存在不足，选择`retake_views`；不要因为物体没有拍全，就认为其有几何缺失。
 - `shape`：这是最重要的维度。仪器整体形态比例必须与参考图大致相似，对这一点一定要反复比对。其次是部件上的几何。检查开口、口沿(向上还是向下)、壁厚、底部、接头、侧面部件、
   物理连接和拓扑。在总体形态比例上必须把每一张当前渲染图与对应/相关的参考产品图逐项对比，指出具体比例或结构偏差，或是从功能的角度(由于参考图上部件细节往往难分辨)指出部件几何存在错误。
 - `graduations`：检查可见刻度/标签/附着，以及精确的体积积分代码，包括真实零体积原点。非均匀容器中等体积刻度间距不均是正常现象。

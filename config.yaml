@@ -48,7 +48,7 @@ models:
     stream: true
     stream_to_terminal: true
     stream_reasoning: progress
-    max_images: 4
+    extra_images: 2
     max_image_side: 1280
     jpeg_quality: 90
 
