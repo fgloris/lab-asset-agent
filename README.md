@@ -277,7 +277,7 @@ runs/<run-id>/
 └── final/                                # 通过时：instrument.py + render/
 ```
 
-评审响应协议：`<REVIEW_JSON>` 内为 `verdict`（`pass` / `revise` / `retake_views`）、`overall_score`、`issues` 等；`revise` 和 `retake_views` 必须同时携带完整 `<BLENDER_SCRIPT>`。`retake_views` 只允许 `camera_coverage` 问题，且返回脚本只能修改摄像机、目标点、镜头与诊断视角。
+评审响应协议：`<REVIEW_JSON>` 内为 `verdict`（`pass` / `revise` / `retake_views`）、`similarity_score`、`issues` 等；`revise` 和 `retake_views` 必须同时携带完整 `<BLENDER_SCRIPT>`。`retake_views` 只允许 `camera_coverage` 问题，且返回脚本只能修改摄像机、目标点、镜头与诊断视角。
 
 ## 9. Prompt 注入点
 

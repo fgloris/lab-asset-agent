@@ -53,8 +53,8 @@ models:
     jpeg_quality: 90
 
 loop:
-  max_iterations: 8
-  pass_score: 8.5
+  max_iterations: 20
+  pass_score: 9.8
   keep_all_iterations: true
   stop_on_repeated_script: true
   max_consecutive_render_failures: 3

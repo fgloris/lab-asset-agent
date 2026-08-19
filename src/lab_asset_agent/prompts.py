@@ -141,14 +141,16 @@ def build_initial_prompt(
 
 REVIEW_SYSTEM_PROMPT = (
     """你是视觉质检工程师兼 Blender 5.2 Python 工程师。联合评判所有提供的渲染图、目标规格和精确脚本。
-只报告可执行的 `moderate`、`major`、`critical` 问题；省略 minor 观察和外观偏好。每个问题必须使用且只能使用
-一个 review_axis：
-
+报告可执行的 `minor`、`moderate`、`major`、`critical` 问题；省略外观偏好。每个问题必须使用且只能使用一个 review_axis：
 - `camera_coverage`：可见性门槛，如需要调整则会应优先执行。首先确保前面的渲染视角必须分别与对应顺序的目标参考图一致，然后检查整体覆盖、有效角度多样性和可读比例。
 若视角存在不足，选择`retake_views`；不要因为物体没有拍全，就认为其有几何缺失。
 - `shape`：这是最重要的维度。仪器整体形态比例必须与参考图大致相似，对这一点一定要反复比对。其次是部件上的几何。检查开口、口沿(向上还是向下)、壁厚、底部、接头、侧面部件、
   物理连接和拓扑。在总体形态比例上必须把每一张当前渲染图与对应/相关的参考产品图逐项对比，指出具体比例或结构偏差，或是从功能的角度(由于参考图上部件细节往往难分辨)指出部件几何存在错误。
 - `graduations`：检查可见刻度/标签/附着，以及精确的体积积分代码，包括真实零体积原点。非均匀容器中等体积刻度间距不均是正常现象。
+
+similarity_score 如何计算：
+- 逐对对比参考图和对应视角，从 0-10 为外形/比例/轮廓的相似度打分，得到 similarity_scores。
+- similarity_score 取 similarity_scores 的算术平均值；没有参考图时，按渲染图与仪器文本描述的一致性给出 0-10 分。
 
 决策规则：
 - `retake_views`：仅修改相机位置、目标/镜头和诊断视角定义。几何、材质、标识、尺寸、刻度计算必须原样保留。
@@ -164,7 +166,8 @@ REVIEW_SYSTEM_PROMPT = (
 <REVIEW_JSON>
 一个合法 JSON 对象。字段名(key)和枚举值必须完全使用下面的英文，不得翻译或改写；字段内容(value)可用中文。
 - `verdict`: `pass` | `revise` | `retake_views`
-- `overall_score`: 0 到 10 的数值
+- `similarity_scores`: 0 到 10 的小数数组，长度与参考图数量相同
+- `similarity_score`: 0 到 10 的小数
 - `issues`: 数组，每项字段为 `review_axis`、`severity`、`view_names`、`observation`、`likely_cause`、
   `recommended_change`
   - `review_axis`: `camera_coverage` | `shape` | `graduations`
@@ -218,7 +221,7 @@ def build_human_hint_context(human_hint: str | None) -> str:
         return "本轮人工指导:\n(无)"
     return f"""本轮人工指导:
 {human_hint.strip()}
-在不违反规格和不可变上下文约束的前提下执行。
+务必重视此指导，此指导高于一切评审生成的review。
 """
 
 

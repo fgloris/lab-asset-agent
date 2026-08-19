@@ -3,11 +3,18 @@ from __future__ import annotations
 import httpx
 import copy
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .config import require_env
-from .models import OpenAICompatibleModelConfig
+from .models import OpenAICompatibleModelConfig, TokenUsage
+
+
+@dataclass
+class ChatCompletion:
+    text: str
+    usage: TokenUsage
 
 
 _SCHEMA_ERROR_MARKERS = (
@@ -187,7 +194,7 @@ class OpenAICompatibleClient:
         response_format_mode: str | None = None,
         stream_label: str | None = None,
         stream_output_path: str | Path | None = None,
-    ) -> str:
+    ) -> ChatCompletion:
         kwargs: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
@@ -206,6 +213,7 @@ class OpenAICompatibleClient:
                 call_kwargs["response_format"] = response_format
             if self.config.stream:
                 call_kwargs["stream"] = True
+                call_kwargs["stream_options"] = {"include_usage": True}
             try:
                 response = await self.client.chat.completions.create(**call_kwargs)
                 if self.config.stream and self._is_stream_response(response):
@@ -214,7 +222,10 @@ class OpenAICompatibleClient:
                         label=stream_label or self.config.model,
                         output_path=Path(stream_output_path) if stream_output_path else None,
                     )
-                return self._message_text(response)
+                return ChatCompletion(
+                    text=self._message_text(response),
+                    usage=self._extract_usage(response),
+                )
             except Exception as exc:
                 if not self._is_response_format_error(exc):
                     raise
@@ -241,7 +252,7 @@ class OpenAICompatibleClient:
         *,
         label: str,
         output_path: Path | None,
-    ) -> str:
+    ) -> ChatCompletion:
         terminal = _StreamTerminal(
             enabled=self.config.stream_to_terminal,
             label=label,
@@ -249,6 +260,7 @@ class OpenAICompatibleClient:
         )
         terminal.start()
         content_parts: list[str] = []
+        usage = TokenUsage()
         output_file = None
         try:
             if output_path is not None:
@@ -256,6 +268,13 @@ class OpenAICompatibleClient:
                 output_file = output_path.open("w", encoding="utf-8")
 
             async for chunk in stream:
+                chunk_usage = self._extract_usage(chunk)
+                if (
+                    chunk_usage.prompt_tokens
+                    or chunk_usage.completion_tokens
+                    or chunk_usage.total_tokens
+                ):
+                    usage = chunk_usage
                 content, reasoning = self._chunk_text(chunk)
                 if reasoning:
                     terminal.reasoning(reasoning)
@@ -276,7 +295,7 @@ class OpenAICompatibleClient:
                 "The streaming endpoint completed without final textual content. "
                 "Reasoning tokens may have been received, but no parseable answer was returned."
             )
-        return text
+        return ChatCompletion(text=text, usage=usage)
 
     @classmethod
     def _chunk_text(cls, chunk: Any) -> tuple[str, str]:
@@ -316,6 +335,24 @@ class OpenAICompatibleClient:
                     parts.append(text)
             return "".join(parts)
         return str(value)
+
+    @classmethod
+    def _extract_usage(cls, value: Any) -> TokenUsage:
+        usage = cls._get_value(value, "usage")
+        if usage is None:
+            return TokenUsage()
+        prompt_tokens = int(cls._get_value(usage, "prompt_tokens") or 0)
+        completion_tokens = int(cls._get_value(usage, "completion_tokens") or 0)
+        total_tokens = cls._get_value(usage, "total_tokens")
+        if total_tokens is None:
+            total_tokens = prompt_tokens + completion_tokens
+        else:
+            total_tokens = int(total_tokens or 0)
+        return TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
 
     def _response_formats(
         self,

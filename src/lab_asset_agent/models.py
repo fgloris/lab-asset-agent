@@ -165,7 +165,8 @@ class HistoricalVisualIssue(VisualIssue):
 
 class VLMReview(BaseModel):
     verdict: Literal["pass", "revise", "retake_views"]
-    overall_score: float = Field(ge=0, le=10)
+    similarity_scores: list[float] = Field(default_factory=list)
+    similarity_score: float = Field(ge=0.0, le=10.0)
     issues: list[VisualIssue] = Field(default_factory=list)
     preserve: list[str] = Field(default_factory=list)
     summary: str
@@ -191,6 +192,17 @@ class IterationRecord(BaseModel):
     review: VLMReview | None = None
 
 
+class TokenUsage(BaseModel):
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+
+    def add(self, other: "TokenUsage") -> None:
+        self.prompt_tokens += other.prompt_tokens
+        self.completion_tokens += other.completion_tokens
+        self.total_tokens += other.total_tokens
+
+
 class RunManifest(BaseModel):
     run_id: str
     spec_id: str
@@ -201,3 +213,4 @@ class RunManifest(BaseModel):
     failure_reason: str | None = None
     human_hint: str | None = None
     human_hint_from_iteration: int = Field(default=1, ge=1)
+    token_usage: TokenUsage = Field(default_factory=TokenUsage)

@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from .models import AppConfig, InstrumentSpec, OpenAICompatibleModelConfig
+from .models import AppConfig, InstrumentSpec, OpenAICompatibleModelConfig, TokenUsage
 from .openai_compatible import OpenAICompatibleClient
 from .prompts import (
     INITIAL_WRITER_SYSTEM_PROMPT,
@@ -59,7 +59,7 @@ class CodeWriter:
         spec: InstrumentSpec,
         candidate_path: Path,
         reference_images: list[Path] = (),
-    ) -> str:
+    ) -> tuple[str, TokenUsage]:
         reference_images = list(reference_images)
         # DeepSeek has no vision route, so reference images only reach the GPT
         # initial generator (which is also the iteration agent's vision config).
@@ -88,7 +88,7 @@ class CodeWriter:
         prompt: str,
         candidate_path: Path,
         reference_images: list[Path] = (),
-    ) -> str:
+    ) -> tuple[str, TokenUsage]:
         user_content: str | list[dict] = prompt
         if reference_images:
             user_content = [{"type": "text", "text": prompt}]
@@ -107,7 +107,7 @@ class CodeWriter:
                 )
         partial_path = candidate_path.with_suffix(".initial_response.partial.txt")
         final_response_path = candidate_path.with_suffix(".initial_response.txt")
-        text = await self.client.chat(
+        completion = await self.client.chat(
             [
                 {"role": "system", "content": INITIAL_WRITER_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
@@ -115,6 +115,7 @@ class CodeWriter:
             stream_label=f"initial generator {self.model_config.model}",
             stream_output_path=partial_path,
         )
+        text = completion.text
         # Persist the exact streamed response before parsing so malformed model
         # output remains inspectable and a successful request is never opaque.
         final_response_path.write_text(text, encoding="utf-8")
@@ -122,7 +123,7 @@ class CodeWriter:
         script, summary = self._parse_response(text)
         candidate_path.parent.mkdir(parents=True, exist_ok=True)
         candidate_path.write_text(script.rstrip() + "\n", encoding="utf-8")
-        return summary
+        return summary, completion.usage
 
     @classmethod
     def _parse_response(cls, text: str) -> tuple[str, str]:

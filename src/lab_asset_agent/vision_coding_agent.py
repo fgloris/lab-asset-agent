@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,21 @@ from .prompts import (
     build_review_prompt,
 )
 from .utils import extract_json_object, image_data_url
+
+
+_PARSE_RETRIES = 3
+
+
+def _print_parse_retry(label: str, attempt: int, exc: Exception) -> None:
+    message = str(exc).replace("\n", " ")
+    if len(message) > 240:
+        message = message[:237] + "..."
+    print(
+        f"[lab-asset-agent] {label}: parse failed on attempt "
+        f"{attempt}/{_PARSE_RETRIES}; retrying. Reason: {message}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 @dataclass
@@ -148,20 +164,32 @@ class VisionCodingAgent:
         # plus a long Python file, which is more reliable as tagged plain text.
         partial_path = script_path.parent / "gpt_review_and_code_response.partial.txt"
         final_response_path = script_path.parent / "gpt_review_and_code_response.txt"
-        text = await self.client.chat(
-            [
-                {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
-                {"role": "user", "content": content},
-            ],
-            stream_label=(
-                f"GPT review+coder iteration {iteration} "
-                f"({self.model_config.model})"
-            ),
-            stream_output_path=partial_path,
-        )
-        final_response_path.write_text(text, encoding="utf-8")
-        partial_path.unlink(missing_ok=True)
-        return self._parse_decision(text)
+        last_error: Exception | None = None
+        for attempt in range(_PARSE_RETRIES):
+            text = await self.client.chat(
+                [
+                    {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+                    {"role": "user", "content": content},
+                ],
+                stream_label=(
+                    f"GPT review+coder iteration {iteration} "
+                    f"({self.model_config.model})"
+                ),
+                stream_output_path=partial_path,
+            )
+            final_response_path.write_text(text, encoding="utf-8")
+            partial_path.unlink(missing_ok=True)
+            try:
+                return self._parse_decision(text)
+            except (ValueError, RuntimeError) as exc:
+                last_error = exc
+                _print_parse_retry(
+                    f"GPT review+coder iteration {iteration}",
+                    attempt + 1,
+                    exc,
+                )
+        assert last_error is not None
+        raise last_error
 
     async def repair_render_failure(
         self,
@@ -202,21 +230,33 @@ class VisionCodingAgent:
                 )
         partial_path = script_path.parent / "repair_agent_response.partial.txt"
         final_response_path = script_path.parent / "repair_agent_response.txt"
-        text = await self.client.chat(
-            [
-                {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            stream_label=(
-                f"GPT render repair iteration {iteration} "
-                f"({self.model_config.model})"
-            ),
-            stream_output_path=partial_path,
-        )
-        final_response_path.write_text(text, encoding="utf-8")
-        partial_path.unlink(missing_ok=True)
-        script, summary = CodeWriter._parse_response(text)
-        return ScriptRepair(script=script, summary=summary, raw_response=text)
+        last_error: Exception | None = None
+        for attempt in range(_PARSE_RETRIES):
+            text = await self.client.chat(
+                [
+                    {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                stream_label=(
+                    f"GPT render repair iteration {iteration} "
+                    f"({self.model_config.model})"
+                ),
+                stream_output_path=partial_path,
+            )
+            final_response_path.write_text(text, encoding="utf-8")
+            partial_path.unlink(missing_ok=True)
+            try:
+                script, summary = CodeWriter._parse_response(text)
+                return ScriptRepair(script=script, summary=summary, raw_response=text)
+            except (ValueError, RuntimeError) as exc:
+                last_error = exc
+                _print_parse_retry(
+                    f"GPT render repair iteration {iteration}",
+                    attempt + 1,
+                    exc,
+                )
+        assert last_error is not None
+        raise last_error
 
     def write_revision(self, decision: VisionCodeDecision, candidate_path: Path) -> None:
         if decision.revised_script is None:

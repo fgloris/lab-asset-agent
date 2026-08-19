@@ -404,7 +404,7 @@ class AssetGenerationOrchestrator:
         else:
             manifest.status = "max_iterations"
             if manifest.iterations and manifest.iterations[-1].review:
-                manifest.final_score = manifest.iterations[-1].review.overall_score
+                manifest.final_score = manifest.iterations[-1].review.similarity_score
             manifest.failure_reason = "Maximum iteration count reached before passing threshold."
             write_json(manifest_path, manifest)
 
@@ -480,7 +480,7 @@ class AssetGenerationOrchestrator:
         manifest.status = "passed"
         manifest.failure_reason = None
         manifest.final_script = final_script
-        manifest.final_score = record.review.overall_score if record.review else None
+        manifest.final_score = record.review.similarity_score if record.review else None
         write_json(run_dir / "manifest.json", manifest)
         self.console.print(f"[bold green]Passed[/bold green]: {final_dir}")
 
@@ -555,7 +555,7 @@ class AssetGenerationOrchestrator:
                 shutil.copy2(image_path, ref_dir / image_path.name)
 
     def _review_passes(self, review) -> bool:
-        return review.verdict == "pass" and review.overall_score >= self.config.loop.pass_score
+        return review.verdict == "pass" and review.similarity_score >= self.config.loop.pass_score
 
     @staticmethod
     def _collect_issue_history(manifest: RunManifest) -> list[HistoricalVisualIssue]:
@@ -582,7 +582,7 @@ class AssetGenerationOrchestrator:
 
     def _print_review(self, review) -> None:
         self.console.print(
-            f"[cyan]Visual score[/cyan]: {review.overall_score:.2f}/10, "
+            f"[cyan]Similarity score[/cyan]: {review.similarity_score:.2f}/10, "
             f"verdict={review.verdict}"
         )
 
