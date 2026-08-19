@@ -529,7 +529,7 @@ class AssetGenerationOrchestrator:
     ) -> None:
         if from_iteration < 1:
             raise ValueError("from_iteration must be at least 1.")
-        keep = [record for record in manifest.iterations if record.iteration < from_iteration]
+        keep = [record for record in manifest.iterations if record.iteration <= from_iteration]
         if len(keep) == len(manifest.iterations):
             return
         snapshot = run_dir / f"iteration_{from_iteration:02d}" / "instrument.py"
