@@ -166,12 +166,11 @@ Visual score: 7.80/10, verdict=revise
 
 ### 4.1 注入人工提示
 
-在生成完成后，你可以从第 2 轮以及之后的每一轮开始，插入一条人工意见，agent 将带着这条意见继续整个流程：
+在生成过程中，你可以插入一条人工意见，agent 将在每一轮评审与修复时带着这条意见继续整个流程：
 
 ```bash
 lab-asset-agent generate desc_dataset/specs/beaker_low_250ml.yaml \
-  --human-hint "倒液嘴应更突出，但不要改变杯身直径" \
-  --human-hint-from-iteration 2
+  --human-hint "倒液嘴应更突出，但不要改变杯身直径"
 ```
 
 ## 5. 续跑：resume
@@ -188,13 +187,20 @@ lab-asset-agent resume -c config.yaml
 lab-asset-agent resume runs/20260731T135845827504Z_burette_50ml
 ```
 
-续跑时加入一条新的人工提示（覆盖原 run 记录的提示），从第 4 轮起生效：
+续跑时加入一条新的人工提示（覆盖原 run 记录的提示）：
 
 ```bash
 lab-asset-agent resume \
   runs/20260731T183050365491Z_separatory_funnel_250ml \
-  --human-hint "瓶颈看起来偏粗，优先核对真实容量瓶的颈身比例" \
-  --human-hint-from-iteration 4
+  --human-hint "瓶颈看起来偏粗，优先核对真实容量瓶的颈身比例"
+```
+
+回退到指定迭代并丢弃其后的记录后继续（用该迭代的脚本快照恢复 `candidate.py`）：
+
+```bash
+lab-asset-agent resume \
+  runs/20260731T183050365491Z_separatory_funnel_250ml \
+  --from-iteration 4
 ```
 
 恢复规则：
@@ -222,8 +228,7 @@ lab-asset-agent batch desc_dataset/common_chemistry_instruments_yaml --no-contin
 
 ```bash
 lab-asset-agent batch desc_dataset/common_chemistry_instruments_yaml \
-  --human-hint "刻度数字必须清晰可读" \
-  --human-hint-from-iteration 3
+  --human-hint "刻度数字必须清晰可读"
 ```
 
 ## 7. 规格文件格式
@@ -304,7 +309,7 @@ src/lab_asset_agent/prompts.py
 | `REVIEW_SYSTEM_PROMPT` | system | 每次成功渲染后的 GPT 评审 + 改写请求（`VisionCodingAgent.review_and_revise`），要求返回 `<REVIEW_JSON>` 与完整 `<BLENDER_SCRIPT>` |
 | `build_revision_context()` | user 片段 | 脚本契约 + 项目文档 + 共享工具库 |
 | `build_issue_history_context()` | user 片段 | 此前全部 moderate / major / critical 问题的回归清单（跨轮记忆） |
-| `build_human_hint_context()` | user 片段 | 从 `--human-hint-from-iteration` 起每一轮注入的 `--human-hint` |
+| `build_human_hint_context()` | user 片段 | 每一轮注入的 `--human-hint` |
 | `build_review_prompt()` | user | 迭代号、视角文件名、通过阈值、规格 + 上述片段 + 产生本轮图片的精确脚本；多视角图片随后以 JPEG base64 追加 |
 
 ### 渲染失败修复（静态校验或 Blender 执行失败时）
@@ -355,7 +360,7 @@ lab-asset-agent gen_pyrex -s desc_dataset/labware_dataset/assets_major.jsonl -l 
 -s, --source    数据集 JSONL 路径（默认 desc_dataset/labware_dataset/assets_major.jsonl）
 -l, --line      要生成的行号（1-indexed，默认 1）
 -c, --config    config.yaml 路径
---human-hint    注入一条人工提示（从 --human-hint-from-iteration 起）
+--human-hint    注入一条人工提示（作用于每一轮）
 ```
 
 参考图注入到 GPT 首版/评审/修复；DeepSeek 首版生成路由不发送图片（不支持视觉），参考图仍进入 GPT 评审与修复。

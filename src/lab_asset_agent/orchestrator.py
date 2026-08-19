@@ -27,16 +27,12 @@ class AssetGenerationOrchestrator:
         console: Console | None = None,
         *,
         human_hint: str | None = None,
-        human_hint_from_iteration: int = 1,
     ):
-        if human_hint_from_iteration < 1:
-            raise ValueError("human_hint_from_iteration must be at least 1.")
         self.config = config
         self.console = console or Console()
         self.blender = BlenderRunner(config)
         self.iteration_agent = VisionCodingAgent(config)
         self.human_hint = human_hint.strip() if human_hint and human_hint.strip() else None
-        self.human_hint_from_iteration = human_hint_from_iteration
 
     async def run(self, spec: InstrumentSpec) -> RunManifest:
         """Start a new run.
@@ -55,7 +51,6 @@ class AssetGenerationOrchestrator:
             run_id=run_id,
             spec_id=spec.id,
             human_hint=self.human_hint,
-            human_hint_from_iteration=self.human_hint_from_iteration,
         )
         manifest_path = run_dir / "manifest.json"
         write_json(run_dir / "spec.json", spec)
@@ -108,7 +103,7 @@ class AssetGenerationOrchestrator:
                 await self.iteration_agent.close()
             self._restore_protected_files(protected)
 
-    async def resume(self, run_dir: Path) -> RunManifest:
+    async def resume(self, run_dir: Path, from_iteration: int | None = None) -> RunManifest:
         """Resume without repeating a completed initial-generation request.
 
         v0.2 manifests are supported. If an old run has renders and a separate
@@ -139,10 +134,8 @@ class AssetGenerationOrchestrator:
         # new hint is supplied, resume keeps the original run guidance.
         if self.human_hint is None:
             self.human_hint = manifest.human_hint
-            self.human_hint_from_iteration = manifest.human_hint_from_iteration
         else:
             manifest.human_hint = self.human_hint
-            manifest.human_hint_from_iteration = self.human_hint_from_iteration
 
         previous_failure = manifest.failure_reason
         manifest.status = "running"
@@ -155,6 +148,8 @@ class AssetGenerationOrchestrator:
             self.console.print(f"[yellow]Previous interruption[/yellow]: {previous_failure}")
 
         candidate_path = run_dir / "candidate.py"
+        if from_iteration is not None:
+            self._truncate_iterations(run_dir, manifest, candidate_path, from_iteration)
         self._restore_candidate_if_missing(run_dir, manifest, candidate_path)
         if not candidate_path.is_file():
             raise FileNotFoundError(
@@ -227,7 +222,7 @@ class AssetGenerationOrchestrator:
                         last.render.images,
                         last.iteration,
                         issue_history=self._collect_issue_history(manifest),
-                        human_hint=self._human_hint_for(last.iteration),
+                        human_hint=self._human_hint_for(),
                     )
                     manifest.token_usage.add(decision.usage)
                     self._save_decision(run_dir, manifest, last, decision)
@@ -251,7 +246,7 @@ class AssetGenerationOrchestrator:
                         last.iteration,
                         last.render.error_summary or "Unknown Blender failure",
                         issue_history=self._collect_issue_history(manifest),
-                        human_hint=self._human_hint_for(last.iteration),
+                        human_hint=self._human_hint_for(),
                     )
                     manifest.token_usage.add(repair.usage)
                     write_json(manifest_path, manifest)
@@ -371,7 +366,7 @@ class AssetGenerationOrchestrator:
                     iteration,
                     render.error_summary or "Unknown Blender failure",
                     issue_history=self._collect_issue_history(manifest),
-                    human_hint=self._human_hint_for(iteration),
+                    human_hint=self._human_hint_for(),
                     reference_images=spec.reference_images,
                 )
                 manifest.token_usage.add(repair.usage)
@@ -525,6 +520,32 @@ class AssetGenerationOrchestrator:
             return local
         raise FileNotFoundError(f"Missing script snapshot for iteration {record.iteration}.")
 
+    def _truncate_iterations(
+        self,
+        run_dir: Path,
+        manifest: RunManifest,
+        candidate_path: Path,
+        from_iteration: int,
+    ) -> None:
+        if from_iteration < 1:
+            raise ValueError("from_iteration must be at least 1.")
+        keep = [record for record in manifest.iterations if record.iteration < from_iteration]
+        if len(keep) == len(manifest.iterations):
+            return
+        snapshot = run_dir / f"iteration_{from_iteration:02d}" / "instrument.py"
+        if not snapshot.is_file():
+            raise FileNotFoundError(
+                f"Cannot rewind to iteration {from_iteration}: missing {snapshot}"
+            )
+        dropped = len(manifest.iterations) - len(keep)
+        manifest.iterations = keep
+        shutil.copy2(snapshot, candidate_path)
+        write_json(run_dir / "manifest.json", manifest)
+        self.console.print(
+            f"[yellow]Rewound to iteration {from_iteration}[/yellow]: "
+            f"restored candidate from {snapshot} and dropped {dropped} later record(s)."
+        )
+
     def _restore_candidate_if_missing(
         self,
         run_dir: Path,
@@ -614,18 +635,13 @@ class AssetGenerationOrchestrator:
         else:
             self.console.print("[green]GPT revised script saved[/green].")
 
-    def _human_hint_for(self, iteration: int) -> str | None:
-        if self.human_hint is None or iteration < self.human_hint_from_iteration:
-            return None
+    def _human_hint_for(self) -> str | None:
         return self.human_hint
 
     def _print_human_hint(self) -> None:
         if self.human_hint is None:
             return
-        self.console.print(
-            f"[yellow]Human hint active from iteration "
-            f"{self.human_hint_from_iteration}[/yellow]: {self.human_hint}"
-        )
+        self.console.print(f"[yellow]Human hint active[/yellow]: {self.human_hint}")
 
     @staticmethod
     def _trailing_render_failure_count(manifest: RunManifest) -> int:

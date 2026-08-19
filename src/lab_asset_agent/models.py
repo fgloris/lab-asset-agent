@@ -212,5 +212,4 @@ class RunManifest(BaseModel):
     iterations: list[IterationRecord] = Field(default_factory=list)
     failure_reason: str | None = None
     human_hint: str | None = None
-    human_hint_from_iteration: int = Field(default=1, ge=1)
     token_usage: TokenUsage = Field(default_factory=TokenUsage)

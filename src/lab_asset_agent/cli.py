@@ -25,12 +25,6 @@ def generate(
         "--human-hint",
         help="Human guidance injected into eligible GPT review/repair iterations.",
     ),
-    human_hint_from_iteration: int = typer.Option(
-        1,
-        "--human-hint-from-iteration",
-        min=1,
-        help="First iteration that receives --human-hint.",
-    ),
 ) -> None:
     """Generate one instrument through initial model -> Blender -> GPT review+code iterations."""
     cfg = load_config(config)
@@ -41,7 +35,6 @@ def generate(
         cfg,
         console,
         human_hint=human_hint,
-        human_hint_from_iteration=human_hint_from_iteration,
     )
     manifest = asyncio.run(orchestrator.run(instrument))
     console.print_json(json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False))
@@ -72,12 +65,6 @@ def gen_pyrex(
         "--human-hint",
         help="Human guidance injected into eligible GPT review/repair iterations.",
     ),
-    human_hint_from_iteration: int = typer.Option(
-        1,
-        "--human-hint-from-iteration",
-        min=1,
-        help="First iteration that receives --human-hint.",
-    ),
 ) -> None:
     """Generate one asset from a 1-indexed line of a JSONL catalog dataset."""
     cfg = load_config(config)
@@ -90,7 +77,6 @@ def gen_pyrex(
         cfg,
         console,
         human_hint=human_hint,
-        human_hint_from_iteration=human_hint_from_iteration,
     )
     manifest = asyncio.run(orchestrator.run(instrument))
     console.print_json(json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False))
@@ -110,11 +96,11 @@ def resume(
         "--human-hint",
         help="Override or add human guidance for the resumed run.",
     ),
-    human_hint_from_iteration: int = typer.Option(
-        1,
-        "--human-hint-from-iteration",
+    from_iteration: int | None = typer.Option(
+        None,
+        "--from-iteration",
         min=1,
-        help="First iteration that receives a newly supplied --human-hint.",
+        help="Rewind and resume from this iteration, dropping later iterations.",
     ),
 ) -> None:
     """Resume an interrupted run without repeating completed initial-generation work."""
@@ -140,9 +126,8 @@ def resume(
         cfg,
         console,
         human_hint=human_hint,
-        human_hint_from_iteration=human_hint_from_iteration,
     )
-    manifest = asyncio.run(orchestrator.resume(run_dir))
+    manifest = asyncio.run(orchestrator.resume(run_dir, from_iteration=from_iteration))
     console.print_json(json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False))
     if manifest.status != "passed":
         raise typer.Exit(code=2)
@@ -157,12 +142,6 @@ def batch(
         None,
         "--human-hint",
         help="Human guidance applied to every generated instrument.",
-    ),
-    human_hint_from_iteration: int = typer.Option(
-        1,
-        "--human-hint-from-iteration",
-        min=1,
-        help="First iteration that receives --human-hint.",
     ),
 ) -> None:
     """Generate every YAML specification in a directory, sequentially."""
@@ -182,7 +161,6 @@ def batch(
                     cfg,
                     console,
                     human_hint=human_hint,
-                    human_hint_from_iteration=human_hint_from_iteration,
                 ).run(load_spec(spec_path))
             )
             table.add_row(
