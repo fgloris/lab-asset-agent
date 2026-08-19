@@ -393,7 +393,7 @@ class AssetGenerationOrchestrator:
                 render.images,
                 iteration,
                 issue_history=self._collect_issue_history(manifest),
-                human_hint=self._human_hint_for(iteration),
+                human_hint=self._human_hint_for(),
                 reference_images=spec.reference_images,
             )
             manifest.token_usage.add(decision.usage)
