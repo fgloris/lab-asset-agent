@@ -228,10 +228,11 @@ def ping(
     from .openai_compatible import OpenAICompatibleClient
 
     async def _ping() -> str:
-        return await OpenAICompatibleClient(model_cfg).chat(
+        completion = await OpenAICompatibleClient(model_cfg).chat(
             [{"role": "user", "content": "Say hello."}],
             stream_label=f"{label}: {model_cfg.model}",
         )
+        return completion.text
 
     reply = asyncio.run(_ping())
     console.print(f"\n[green]Ping OK[/green]: {reply.strip()}")

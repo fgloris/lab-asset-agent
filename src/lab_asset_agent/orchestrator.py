@@ -14,6 +14,7 @@ from .models import (
     InstrumentSpec,
     IterationRecord,
     RunManifest,
+    TokenUsage,
 )
 from .utils import sha256_file, utc_run_id, write_json
 from .vision_coding_agent import VisionCodeDecision, VisionCodingAgent
@@ -76,9 +77,11 @@ class AssetGenerationOrchestrator:
             self.console.print(
                 f"[cyan]Calling initial generator[/cyan]: {model} (route={route})..."
             )
-            writer_summary = await initial_writer.create_initial(
+            writer_summary, initial_usage = await initial_writer.create_initial(
                 spec, candidate_path, reference_images=spec.reference_images
             )
+            manifest.token_usage.add(initial_usage)
+            write_json(manifest_path, manifest)
             self.console.print(f"[green]Initial script saved[/green]: {candidate_path}")
             self._restore_protected_files(protected)
 
@@ -226,8 +229,10 @@ class AssetGenerationOrchestrator:
                         issue_history=self._collect_issue_history(manifest),
                         human_hint=self._human_hint_for(last.iteration),
                     )
+                    manifest.token_usage.add(decision.usage)
                     self._save_decision(run_dir, manifest, last, decision)
                     self._print_review(decision.review)
+                    self._print_token_usage(manifest.token_usage)
                     if self._review_passes(decision.review):
                         self._finalize_passed(run_dir, spec, manifest, last)
                         return manifest
@@ -248,6 +253,8 @@ class AssetGenerationOrchestrator:
                         issue_history=self._collect_issue_history(manifest),
                         human_hint=self._human_hint_for(last.iteration),
                     )
+                    manifest.token_usage.add(repair.usage)
+                    write_json(manifest_path, manifest)
                     candidate_path.write_text(repair.script.rstrip() + "\n", encoding="utf-8")
                     writer_summary = repair.summary
                     iteration_dir = run_dir / f"iteration_{last.iteration:02d}"
@@ -255,6 +262,7 @@ class AssetGenerationOrchestrator:
                         repair.raw_response, encoding="utf-8"
                     )
                     self.console.print("[green]GPT repaired script saved[/green].")
+                    self._print_token_usage(manifest.token_usage)
                     self._restore_protected_files(protected)
             else:
                 self.console.print(
@@ -366,12 +374,15 @@ class AssetGenerationOrchestrator:
                     human_hint=self._human_hint_for(iteration),
                     reference_images=spec.reference_images,
                 )
+                manifest.token_usage.add(repair.usage)
+                write_json(manifest_path, manifest)
                 candidate_path.write_text(repair.script.rstrip() + "\n", encoding="utf-8")
                 writer_summary = repair.summary
                 (iteration_dir / "repair_agent_response.txt").write_text(
                     repair.raw_response, encoding="utf-8"
                 )
                 self.console.print("[green]GPT repaired script saved[/green].")
+                self._print_token_usage(manifest.token_usage)
                 self._restore_protected_files(protected)
                 continue
 
@@ -390,8 +401,10 @@ class AssetGenerationOrchestrator:
                 human_hint=self._human_hint_for(iteration),
                 reference_images=spec.reference_images,
             )
+            manifest.token_usage.add(decision.usage)
             self._save_decision(run_dir, manifest, record, decision)
             self._print_review(decision.review)
+            self._print_token_usage(manifest.token_usage)
 
             if self._review_passes(decision.review):
                 self._finalize_passed(run_dir, spec, manifest, record)
@@ -584,6 +597,12 @@ class AssetGenerationOrchestrator:
         self.console.print(
             f"[cyan]Similarity score[/cyan]: {review.similarity_score:.2f}/10, "
             f"verdict={review.verdict}"
+        )
+
+    def _print_token_usage(self, usage: TokenUsage) -> None:
+        self.console.print(
+            f"[cyan]Total token usage[/cyan]: {usage.total_tokens:,} "
+            f"(prompt {usage.prompt_tokens:,}, completion {usage.completion_tokens:,})"
         )
 
     def _print_revision_saved(self, decision: VisionCodeDecision) -> None:

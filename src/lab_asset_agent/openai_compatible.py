@@ -162,6 +162,7 @@ class OpenAICompatibleClient:
         client: Any | None = None,
     ) -> None:
         self.config = config
+        self._stream_usage_supported = True
         if client is not None:
             self.client = client
         else:
@@ -213,9 +214,8 @@ class OpenAICompatibleClient:
                 call_kwargs["response_format"] = response_format
             if self.config.stream:
                 call_kwargs["stream"] = True
-                call_kwargs["stream_options"] = {"include_usage": True}
             try:
-                response = await self.client.chat.completions.create(**call_kwargs)
+                response = await self._create_stream_completion(call_kwargs)
                 if self.config.stream and self._is_stream_response(response):
                     return await self._consume_stream(
                         response,
@@ -245,6 +245,51 @@ class OpenAICompatibleClient:
         if getattr(response, "choices", None) is not None:
             return False
         return hasattr(response, "__aiter__") or hasattr(response, "__iter__")
+
+    async def _create_stream_completion(self, call_kwargs: dict[str, Any]) -> Any:
+        if not call_kwargs.get("stream"):
+            return await self.client.chat.completions.create(**call_kwargs)
+        if self._stream_usage_supported:
+            call_kwargs["stream_options"] = {"include_usage": True}
+            try:
+                return await self.client.chat.completions.create(**call_kwargs)
+            except Exception as exc:
+                if not self._is_stream_options_error(exc):
+                    raise
+                call_kwargs.pop("stream_options", None)
+                self._stream_usage_supported = False
+                self._print_stream_options_fallback(exc)
+        return await self.client.chat.completions.create(**call_kwargs)
+
+    @staticmethod
+    def _is_stream_options_error(exc: Exception) -> bool:
+        parts = [str(exc)]
+        for attribute in ("message", "body", "response"):
+            value = getattr(exc, attribute, None)
+            if value is not None:
+                parts.append(str(value))
+        text = " ".join(parts).lower()
+        return any(
+            marker in text
+            for marker in (
+                "stream_options",
+                "include_usage",
+                "unexpected keyword",
+                "unknown parameter",
+            )
+        )
+
+    @staticmethod
+    def _print_stream_options_fallback(exc: Exception) -> None:
+        message = str(exc).replace("\n", " ")
+        if len(message) > 240:
+            message = message[:237] + "..."
+        print(
+            "[lab-asset-agent] Endpoint rejected stream usage stats; retrying "
+            f"without token usage. Reason: {message}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     async def _consume_stream(
         self,
@@ -343,11 +388,9 @@ class OpenAICompatibleClient:
             return TokenUsage()
         prompt_tokens = int(cls._get_value(usage, "prompt_tokens") or 0)
         completion_tokens = int(cls._get_value(usage, "completion_tokens") or 0)
-        total_tokens = cls._get_value(usage, "total_tokens")
-        if total_tokens is None:
+        total_tokens = int(cls._get_value(usage, "total_tokens") or 0)
+        if total_tokens == 0:
             total_tokens = prompt_tokens + completion_tokens
-        else:
-            total_tokens = int(total_tokens or 0)
         return TokenUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,

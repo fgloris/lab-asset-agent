@@ -3,11 +3,17 @@ from __future__ import annotations
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .code_writer import CodeWriter
-from .models import AppConfig, HistoricalVisualIssue, InstrumentSpec, VLMReview
+from .models import (
+    AppConfig,
+    HistoricalVisualIssue,
+    InstrumentSpec,
+    TokenUsage,
+    VLMReview,
+)
 from .openai_compatible import OpenAICompatibleClient
 from .prompts import (
     REPAIR_SYSTEM_PROMPT,
@@ -45,6 +51,7 @@ class VisionCodeDecision:
     revised_script: str | None
     summary: str
     raw_response: str
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 @dataclass
@@ -52,6 +59,7 @@ class ScriptRepair:
     script: str
     summary: str
     raw_response: str
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 class VisionCodingAgent:
@@ -164,9 +172,10 @@ class VisionCodingAgent:
         # plus a long Python file, which is more reliable as tagged plain text.
         partial_path = script_path.parent / "gpt_review_and_code_response.partial.txt"
         final_response_path = script_path.parent / "gpt_review_and_code_response.txt"
+        total_usage = TokenUsage()
         last_error: Exception | None = None
         for attempt in range(_PARSE_RETRIES):
-            text = await self.client.chat(
+            completion = await self.client.chat(
                 [
                     {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
                     {"role": "user", "content": content},
@@ -177,10 +186,14 @@ class VisionCodingAgent:
                 ),
                 stream_output_path=partial_path,
             )
+            total_usage.add(completion.usage)
+            text = completion.text
             final_response_path.write_text(text, encoding="utf-8")
             partial_path.unlink(missing_ok=True)
             try:
-                return self._parse_decision(text)
+                decision = self._parse_decision(text)
+                decision.usage = total_usage
+                return decision
             except (ValueError, RuntimeError) as exc:
                 last_error = exc
                 _print_parse_retry(
@@ -230,9 +243,10 @@ class VisionCodingAgent:
                 )
         partial_path = script_path.parent / "repair_agent_response.partial.txt"
         final_response_path = script_path.parent / "repair_agent_response.txt"
+        total_usage = TokenUsage()
         last_error: Exception | None = None
         for attempt in range(_PARSE_RETRIES):
-            text = await self.client.chat(
+            completion = await self.client.chat(
                 [
                     {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
@@ -243,11 +257,18 @@ class VisionCodingAgent:
                 ),
                 stream_output_path=partial_path,
             )
+            total_usage.add(completion.usage)
+            text = completion.text
             final_response_path.write_text(text, encoding="utf-8")
             partial_path.unlink(missing_ok=True)
             try:
                 script, summary = CodeWriter._parse_response(text)
-                return ScriptRepair(script=script, summary=summary, raw_response=text)
+                return ScriptRepair(
+                    script=script,
+                    summary=summary,
+                    raw_response=text,
+                    usage=total_usage,
+                )
             except (ValueError, RuntimeError) as exc:
                 last_error = exc
                 _print_parse_retry(
