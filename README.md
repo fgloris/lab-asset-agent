@@ -180,7 +180,7 @@ Blender finished in 42.1s; images=3, success=True
 Calling review+coder: gpt-5.6-luna with exact code and 3 image(s)...
 <REVIEW_JSON>...逐步出现...</REVIEW_JSON>
 <BLENDER_SCRIPT>...下一版完整代码...</BLENDER_SCRIPT>
-Visual score: 7.80/10, verdict=revise
+Visual score: 3.80/5.0, verdict=revise
 ```
 
 ### 4.1 注入人工提示
