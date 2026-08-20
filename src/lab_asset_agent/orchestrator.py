@@ -644,7 +644,7 @@ class AssetGenerationOrchestrator:
 
     def _print_review(self, review) -> None:
         self.console.print(
-            f"[cyan]Similarity score[/cyan]: {review.similarity_score:.2f}/10, "
+            f"[cyan]Similarity score[/cyan]: {review.similarity_score:.2f}/5.0, "
             f"verdict={review.verdict}"
         )
 

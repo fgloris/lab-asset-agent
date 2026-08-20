@@ -149,7 +149,11 @@ REVIEW_SYSTEM_PROMPT = (
 - `graduations`：检查可见刻度/标签/附着，以及精确的体积积分代码，包括真实零体积原点。非均匀容器中等体积刻度间距不均是正常现象。
 
 similarity_score 如何计算：
-- 逐对对比参考图和对应视角，从 0-10 为外形/比例/轮廓的相似度打分，得到 similarity_scores。
+- 逐对对比参考图和对应视角，从 0-10 为外形/比例/轮廓的相似度打分(可用小数)，得到 similarity_scores。
+- 评分锚点：1-完全不是同一种仪器或主体不可识别，参考图和渲染图完全对不上；2-仪器类别正确但整体轮廓、主要部件或比例明显错误；
+  3-仪器轮廓大致正确，参考图和渲染图语义上相似，但部分关键部件缺失，总体比例/轮廓仍偏离参考图；4-仪器轮廓和比例大致一致，参考图和渲染图在像素上相似，没有关键部件缺失；
+  5-表示与参考图在形态、比例、轮廓和关键结构上完全一致。
+- 不要因为材质、透明度、曝光、阴影或背景风格相似而提高分数；评分主要依据几何形态、比例、轮廓和关键功能结构。
 - similarity_score 取 similarity_scores 的算术平均值；没有参考图时，按渲染图与仪器文本描述的一致性给出 0-10 分。
 
 决策规则：
@@ -169,8 +173,8 @@ similarity_score 如何计算：
 <REVIEW_JSON>
 一个合法 JSON 对象。字段名(key)和枚举值必须完全使用下面的英文，不得翻译或改写；字段内容(value)可用中文。
 - `verdict`: `pass` | `revise` | `retake_views`
-- `similarity_scores`: 0 到 10 的小数数组，长度与参考图数量相同
-- `similarity_score`: 0 到 10 的小数
+- `similarity_scores`: 0 到 5 的小数数组，长度与参考图数量相同
+- `similarity_score`: 0 到 5 的小数
 - `issues`: 数组，每项字段为 `review_axis`、`severity`、`observation`、`likely_cause`、`recommended_change`
   - `review_axis`: `camera_coverage` | `shape` | `graduations`
   - `severity`: `moderate` | `major` | `critical`

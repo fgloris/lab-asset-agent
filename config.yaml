@@ -47,7 +47,7 @@ models:
 
 loop:
   max_iterations: 50
-  pass_score: 9.8
+  pass_score: 4.8
   issue_history_window: 5
   keep_all_iterations: true
   stop_on_repeated_script: true

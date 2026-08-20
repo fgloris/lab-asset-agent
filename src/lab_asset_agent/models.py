@@ -189,7 +189,7 @@ class HistoricalVisualIssue(VisualIssue):
 class VLMReview(BaseModel):
     verdict: Literal["pass", "revise", "retake_views"]
     similarity_scores: list[float] = Field(default_factory=list)
-    similarity_score: float = Field(ge=0.0, le=10.0)
+    similarity_score: float = Field(ge=0.0, le=5.0)
     issues: list[VisualIssue] = Field(default_factory=list)
     preserve: list[str] = Field(default_factory=list)
 

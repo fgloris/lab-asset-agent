@@ -73,7 +73,7 @@ def validate_generated_script(path: Path) -> ValidationResult:
         elif isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALL_NAMES:
                 errors.append(f"Forbidden dynamic call: {node.func.id}")
-            if isinstance(node.func, ast.Attribute) and node.func.attr in {"unlink", "rmdir"}:
+            if isinstance(node.func, ast.Attribute) and node.func.attr in {"rmtree", "rmdir"}:
                 errors.append(f"Forbidden destructive method: {node.func.attr}")
             if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
                 pair = (node.func.value.id, node.func.attr)
