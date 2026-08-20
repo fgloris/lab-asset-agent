@@ -212,7 +212,7 @@ class AssetGenerationOrchestrator:
                             f"Iteration {last.iteration} was marked rendered but no PNG files exist."
                         )
                     self.console.print(
-                        f"[cyan]Calling GPT review+coder[/cyan]: "
+                        f"[cyan]Calling review+coder[/cyan]: "
                         f"{self.config.models.iterative_model.model} with code and "
                         f"{len(last.render.images)} existing image(s)..."
                     )
@@ -237,7 +237,7 @@ class AssetGenerationOrchestrator:
                     self._restore_protected_files(protected)
                 else:
                     self.console.print(
-                        f"[cyan]Calling GPT repair agent[/cyan]: "
+                        f"[cyan]Calling repair agent[/cyan]: "
                         f"{self.config.models.iterative_model.model} with code and Blender log..."
                     )
                     repair = await self.iterative_agent.repair_render_failure(
@@ -357,7 +357,7 @@ class AssetGenerationOrchestrator:
                     write_json(manifest_path, manifest)
                     break
                 self.console.print(
-                    f"[cyan]Calling GPT repair agent[/cyan]: "
+                    f"[cyan]Calling repair agent[/cyan]: "
                     f"{self.config.models.iterative_model.model} with current code and Blender log..."
                 )
                 repair = await self.iterative_agent.repair_render_failure(
@@ -383,7 +383,7 @@ class AssetGenerationOrchestrator:
 
             consecutive_render_failures = 0
             self.console.print(
-                f"[cyan]Calling GPT review+coder[/cyan]: "
+                f"[cyan]Calling review+coder[/cyan]: "
                 f"{self.config.models.iterative_model.model} with exact code and "
                 f"{len(render.images)} image(s)..."
             )
