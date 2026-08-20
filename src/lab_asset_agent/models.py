@@ -170,9 +170,13 @@ class AppConfig(BaseModel):
 
 
 class VisualIssue(BaseModel):
-    review_axis: Literal["camera_coverage", "shape", "graduations"] = (
-        "shape"
-    )
+    review_axis: Literal[
+        "camera_coverage",
+        "overall_shape",
+        "component_shape",
+        "graduations",
+        "shape",
+    ] = "overall_shape"
     severity: Literal["critical", "major", "moderate", "minor"]
     observation: str
     likely_cause: str

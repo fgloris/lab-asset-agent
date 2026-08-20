@@ -324,6 +324,11 @@ class VisionCodingAgent:
                 raise RuntimeError(
                     f"GPT review issue {issue_index} is missing required `review_axis`."
                 )
+            if issue["review_axis"] == "shape":
+                raise RuntimeError(
+                    "GPT review issue uses deprecated `shape`; use `overall_shape` "
+                    "or `component_shape`."
+                )
             actionable_issues.append(issue)
 
         review_payload = dict(review_payload)

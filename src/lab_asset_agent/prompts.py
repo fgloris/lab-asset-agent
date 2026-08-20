@@ -64,7 +64,7 @@ def build_reference_pairing_guidance(pair_count: int, extra_count: int) -> str:
     lines = [
         f"硬性对齐目标：本次图片按「目标参考图 → 当前渲染视角」成对排列，共 {pair_count} 对。",
         f"前 {pair_count} 个当前渲染视角必须分别与对应顺序的目标参考图在整体轮廓、比例和部件布局上尽量接近，"
-        "这是 shape 评分与是否 revise 的首要依据。",
+        "这是 overall_shape 评分与是否 revise 的首要依据。",
     ]
     if extra_count:
         lines.append(
@@ -144,24 +144,26 @@ REVIEW_SYSTEM_PROMPT = (
 报告可执行的 `minor`、`moderate`、`major`、`critical` 问题；省略外观偏好。每个问题必须使用且只能使用一个 review_axis：
 - `camera_coverage`：可见性门槛，如需要调整则会应优先执行。首先确保前面的渲染视角必须分别与对应顺序的目标参考图一致，然后检查整体覆盖、有效角度多样性和可读比例。
 若视角存在不足，选择`retake_views`；不要因为物体没有拍全，就认为其有几何缺失。
-- `shape`：这是最重要的维度。仪器整体形态比例必须与参考图大致相似，对这一点一定要反复比对。其次是部件上的几何。检查开口、口沿(向上还是向下)、壁厚、底部、接头、侧面部件、
-  物理连接和拓扑。在总体形态比例上必须把每一张当前渲染图与对应/相关的参考产品图逐项对比，指出具体比例或结构偏差，或是从功能的角度(由于参考图上部件细节往往难分辨)指出部件几何存在错误。
+- `overall_shape`：最重要的维度。只评估仪器整体体态、外轮廓、长宽高比例、颈/肩/腹/底等大尺度比例关系、主体姿态和整体部件布局。
+  必须把每一张当前渲染图与对应/相关的参考产品图逐项对比，指出具体的整体比例、轮廓或体态偏差。
+- `component_shape`：评估局部部件几何和连接关系。检查开口、口沿(向上还是向下)、壁厚、底部、接头、侧面部件、把手/塞子/阀门/管嘴等局部结构、
+  物理连接和拓扑。不要把整体高矮胖瘦问题放到此轴；那应归入 `overall_shape`。
 - `graduations`：检查可见刻度/标签/附着，以及精确的体积积分代码，包括真实零体积原点。非均匀容器中等体积刻度间距不均是正常现象。
 
 similarity_score 如何计算：
 - 逐对对比参考图和对应视角，从 0-5 为外形/比例/轮廓的相似度打分(可用小数)，得到 similarity_scores。
-- 评分锚点：1-完全不是同一种仪器或主体不可识别，参考图和渲染图完全对不上；2-仪器类别正确但整体轮廓、主要部件或比例明显错误；
-  3-仪器轮廓大致正确，参考图和渲染图语义上相似，但部分关键部件缺失，总体比例/轮廓仍偏离参考图；4-仪器轮廓和比例大致一致，参考图和渲染图在像素上相似，没有关键部件缺失；
-  5-表示与参考图在形态、比例、轮廓和关键结构上完全一致。
+- 评分锚点：0-1：完全不是同一种仪器或主体不可识别，参考图和渲染图完全对不上；1-2：仪器类别正确但整体轮廓、主要部件或比例明显错误；
+  2-3：总体比例/轮廓有偏差，部分关键部件缺失；3-4：仪器轮廓和部件比例大致一致，参考图和渲染图语义上相似，没有关键部件缺失；
+  4-5：仪器轮廓和部件比例一致，参考图和渲染图的轮廓可以在像素级别对比，但关键部位的转折、包含关系等细节仍有缺陷；5：渲染图与参考图在形态、比例、轮廓和关键结构上完全一致。
 - 不要因为材质、透明度、曝光、阴影或背景风格相似而提高分数；评分主要依据几何形态、比例、轮廓和关键功能结构。
 - similarity_score 取 similarity_scores 的算术平均值；没有参考图时，按渲染图与仪器文本描述的一致性给出 0-10 分。
 
 决策规则：
 - `retake_views`：仅修改相机位置、目标/镜头和诊断视角定义。几何、材质、标识、尺寸、刻度计算必须原样保留。
-- `revise`：视角覆盖充分且至少存在一个 moderate 或以上 shape/graduation 问题需要修复；返回完整修正后的脚本。
+- `revise`：视角覆盖充分且至少存在一个 moderate 或以上 overall_shape/component_shape/graduations 问题需要修复；返回完整修正后的脚本。
 - `pass`：覆盖充分且不再存在 moderate 及以上缺陷。
 
-覆盖充分时，shape 重要性约占 80%，graduations 约占 20%。忽略暗部、弱反射/高光、表观透明度、曝光、
+覆盖充分时，overall_shape 重要性最高，其次是 component_shape，graduations 用于补充判定。忽略暗部、弱反射/高光、表观透明度、曝光、
 对比度、阴影以及其他光照/渲染风格差异；但不得用这些风格理由掩盖真实几何差异。绝不要通过修改相机或渲染
 来掩盖真实缺陷。
 
@@ -176,7 +178,7 @@ similarity_score 如何计算：
 - `similarity_scores`: 0 到 5 的小数数组，长度与参考图数量相同
 - `similarity_score`: 0 到 5 的小数
 - `issues`: 数组，每项字段为 `review_axis`、`severity`、`observation`、`likely_cause`、`recommended_change`
-  - `review_axis`: `camera_coverage` | `shape` | `graduations`
+  - `review_axis`: `camera_coverage` | `overall_shape` | `component_shape` | `graduations`
   - `severity`: `moderate` | `major` | `critical`
   - `observation`、`likely_cause`、`recommended_change`: 字符串，可用中文
 - `preserve`: 字符串数组，列出需要保留的正确内容
