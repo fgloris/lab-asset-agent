@@ -53,7 +53,7 @@ pip install -e ".[dev]"
 
 ```bash
 export VECTOR_ENGINE_API_KEY="sk-..."
-export DEEPSEEK_API_KEY="sk-..."   # 仅当 initial_generator 指向 deepseek 时需要
+export DEEPSEEK_API_KEY="sk-..."   # 仅当 initial_coder 或 iterative_coder 指向 deepseek 时需要
 ```
 
 ## 2. 配置
@@ -69,8 +69,9 @@ blender:
   minimum_render_count: 3
 
 models:
-  initial_generator: vectorengine   # 首版脚本由哪个模型源生成
-  iterative_generator: vectorengine # 之后评审/改代码/修复由哪个模型源执行，必须 vision: true
+  initial_coder: vectorengine       # 首版脚本由哪个模型源生成
+  visual_reviewer: vectorengine     # 渲染图评审，必须 vision: true
+  iterative_coder: deepseek         # 根据 review 改代码/修复报错，可为纯语言模型
 
   # 所有模型源共享的连接/流式/图片设置
   stream: true
@@ -112,8 +113,8 @@ paths:
 
 要点：
 
-- **只有第一版脚本**受 `initial_generator` 控制。首轮渲染之后，评审、改代码、修复 Blender 报错全部由 `iterative_generator` 完成。
-- 每个 `providers` 条目是一个模型源；`vision: true` 表示该模型支持图像输入，只有支持视觉的模型源才能作为 `iterative_generator`。
+- **所有写代码阶段**都走 coder 路由：首版脚本由 `initial_coder` 生成，后续修订和渲染失败修复由 `iterative_coder` 完成。
+- 渲染成功后的图片评审由 `visual_reviewer` 完成；每个 `providers` 条目是一个模型源，只有 `vision: true` 的模型源才能作为 `visual_reviewer`。
 - `stream` / `stream_to_terminal` / `stream_reasoning` 以及连接、超时、图片尺寸等是共享设置，放在 `models` 外层，自动应用到所有模型源；如需单独覆盖，也可在某个 provider 下重写。
 - 工具库和参考脚本是**受保护文件**，运行结束会自动校验并恢复，不会被模型改动。
 
@@ -145,7 +146,7 @@ lab-asset-agent ping vectorengine -c config.yaml
 lab-asset-agent ping deepseek -c config.yaml
 ```
 
-省略模型名时，默认测试 `iterative_generator` 指向的模型源：
+省略模型名时，默认测试 `visual_reviewer` 指向的模型源：
 
 ```bash
 lab-asset-agent ping -c config.yaml
@@ -176,7 +177,8 @@ Initial script saved: runs/20260802T..._erlenmeyer_250ml/candidate.py
 ──────────────── Iteration 1 ────────────────
 Starting Blender...
 Blender finished in 42.1s; images=3, success=True
-Calling GPT review+coder: gpt-5.6-luna with exact code and 3 image(s)...
+Calling visual reviewer + coder: gpt-5.6-luna -> deepseek-reasoner with exact code and 3 image(s)...
+<DIFFERENCE>...参考图/渲染图差异...</DIFFERENCE>
 <REVIEW_JSON>...逐步出现...</REVIEW_JSON>
 <BLENDER_SCRIPT>...下一版完整代码...</BLENDER_SCRIPT>
 Visual score: 7.80/10, verdict=revise
@@ -293,7 +295,9 @@ runs/<run-id>/
 │   │   ├── *.blend
 │   │   └── blender.log
 │   ├── review.json
-│   ├── gpt_review_and_code_response.txt  # GPT 原始合并响应
+│   ├── difference.txt                   # 参考图/渲染图差异说明
+│   ├── gpt_review_response.txt          # GPT 评审原始响应
+│   ├── gpt_revision_response.txt        # GPT 改代码原始响应
 │   ├── next_instrument.py                # revise / retake_views 的下一版
 │   └── repair_agent_response.txt         # 渲染失败时才出现
 ├── iteration_02/
@@ -316,7 +320,7 @@ src/lab_asset_agent/prompts.py
 
 | Prompt | 角色 | 注入时机 |
 | --- | --- | --- |
-| `INITIAL_WRITER_SYSTEM_PROMPT` | system | 第一版脚本调用（`CodeWriter`），由 `initial_generator` 指定的模型源执行 |
+| `INITIAL_WRITER_SYSTEM_PROMPT` | system | 第一版脚本调用（`CodeWriter`），由 `initial_coder` 指定的模型源执行 |
 | `build_shared_context()` | user 片段 | 脚本契约 + 项目文档 + 参考脚本 + 共享工具库 |
 | `build_initial_prompt()` | user | 目标规格 + 上述上下文 + 生成脚本路径 |
 
@@ -324,17 +328,19 @@ src/lab_asset_agent/prompts.py
 
 | Prompt | 角色 | 注入时机 |
 | --- | --- | --- |
-| `REVIEW_SYSTEM_PROMPT` | system | 每次成功渲染后的 GPT 评审 + 改写请求（`VisionCodingAgent.review_and_revise`），要求返回 `<REVIEW_JSON>` 与完整 `<BLENDER_SCRIPT>` |
+| `REVIEW_SYSTEM_PROMPT` | system | 每次成功渲染后的视觉评审请求（`VisualReviewer.review`），先返回 `<DIFFERENCE>`，再返回 `<REVIEW_JSON>` |
+| `CODE_REVISE_SYSTEM_PROMPT` | system | 根据上一轮 `review.json` 生成下一版脚本（`CodeWriter.revise_from_review`），只返回完整 `<BLENDER_SCRIPT>` |
 | `build_revision_context()` | user 片段 | 脚本契约 + 项目文档 + 共享工具库 |
 | `build_issue_history_context()` | user 片段 | 此前全部 moderate / major / critical 问题的回归清单（跨轮记忆） |
 | `build_human_hint_context()` | user 片段 | 每一轮注入的 `--human-hint` |
 | `build_review_prompt()` | user | 迭代号、视角文件名、通过阈值、规格 + 上述片段 + 产生本轮图片的精确脚本；多视角图片随后以 JPEG base64 追加 |
+| `build_revision_prompt()` | user | 迭代号、`review.verdict`、`review.json`、当前精确脚本 + 上述片段；不再附带图片 |
 
 ### 渲染失败修复（静态校验或 Blender 执行失败时）
 
 | Prompt | 角色 | 注入时机 |
 | --- | --- | --- |
-| `REPAIR_SYSTEM_PROMPT` | system | 渲染失败后的修复请求（`VisionCodingAgent.repair_render_failure`），要求返回 `<SUMMARY>` 与完整 `<BLENDER_SCRIPT>` |
+| `REPAIR_SYSTEM_PROMPT` | system | 渲染失败后的修复请求（`CodeWriter.repair_render_failure`），只返回完整 `<BLENDER_SCRIPT>` |
 | `build_repair_context()` | user 片段 | 脚本契约 + 共享工具库（不携带文档，保持最小上下文） |
 | `build_issue_history_context()` / `build_human_hint_context()` | user 片段 | 同评审流程 |
 | `build_repair_prompt()` | user | 目标规格 + 失败脚本 + Blender 错误日志 |

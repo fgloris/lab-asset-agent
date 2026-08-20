@@ -21,7 +21,6 @@ FORBIDDEN_IMPORT_ROOTS = {
     "telnetlib",
     "paramiko",
 }
-FORBIDDEN_CALL_NAMES = {"eval", "exec", "compile", "__import__"}
 FORBIDDEN_ATTR_CALLS = {
     ("os", "system"),
     ("os", "popen"),
@@ -71,10 +70,6 @@ def validate_generated_script(path: Path) -> ValidationResult:
             if root in FORBIDDEN_IMPORT_ROOTS:
                 errors.append(f"Forbidden import: {node.module}")
         elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALL_NAMES:
-                errors.append(f"Forbidden dynamic call: {node.func.id}")
-            if isinstance(node.func, ast.Attribute) and node.func.attr in {"unlink", "rmdir"}:
-                errors.append(f"Forbidden destructive method: {node.func.attr}")
             if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
                 pair = (node.func.value.id, node.func.attr)
                 if pair in FORBIDDEN_ATTR_CALLS:

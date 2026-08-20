@@ -33,7 +33,7 @@ class ModelConfig(BaseModel):
     """Configuration for a single OpenAI-compatible model endpoint.
 
     ``vision`` marks whether the model accepts image inputs. Only a
-    vision-capable model may be selected as ``iterative_generator``.
+    vision-capable model may be selected as ``visual_reviewer``.
     """
 
     base_url: str
@@ -70,12 +70,17 @@ class ModelsConfig(BaseModel):
     """Model routing via named providers.
 
     Shared transport/streaming/image settings live here and are applied to
-    every provider unless that provider overrides them. ``iterative_generator``
-    must be vision-capable.
+    every provider unless that provider overrides them. ``visual_reviewer``
+    must be vision-capable. Legacy ``initial_generator`` and
+    ``iterative_generator`` keys are accepted and mapped onto the coder/reviewer
+    routes for existing configs.
     """
 
-    initial_generator: str
-    iterative_generator: str
+    initial_coder: str
+    visual_reviewer: str
+    iterative_coder: str
+    initial_generator: str | None = None
+    iterative_generator: str | None = None
     providers: dict[str, ModelConfig]
 
     stream: bool = True
@@ -94,6 +99,12 @@ class ModelsConfig(BaseModel):
         if not isinstance(value, dict):
             return value
         data = dict(value)
+        if "initial_coder" not in data and "initial_generator" in data:
+            data["initial_coder"] = data["initial_generator"]
+        if "visual_reviewer" not in data and "iterative_generator" in data:
+            data["visual_reviewer"] = data["iterative_generator"]
+        if "iterative_coder" not in data:
+            data["iterative_coder"] = data.get("iterative_generator") or data.get("initial_coder")
         providers = data.get("providers")
         if not isinstance(providers, dict):
             return data
@@ -108,24 +119,28 @@ class ModelsConfig(BaseModel):
     def validate_routes(self) -> "ModelsConfig":
         unknown = [
             name
-            for name in (self.initial_generator, self.iterative_generator)
+            for name in (self.initial_coder, self.visual_reviewer, self.iterative_coder)
             if name not in self.providers
         ]
         if unknown:
             raise ValueError(f"Unknown model source(s): {', '.join(unknown)}")
-        if not self.providers[self.iterative_generator].vision:
+        if not self.providers[self.visual_reviewer].vision:
             raise ValueError(
-                "models.iterative_generator must reference a model with vision: true."
+                "models.visual_reviewer must reference a model with vision: true."
             )
         return self
 
     @property
     def initial_model(self) -> ModelConfig:
-        return self.providers[self.initial_generator]
+        return self.providers[self.initial_coder]
+
+    @property
+    def reviewer_model(self) -> ModelConfig:
+        return self.providers[self.visual_reviewer]
 
     @property
     def iterative_model(self) -> ModelConfig:
-        return self.providers[self.iterative_generator]
+        return self.providers[self.iterative_coder]
 
 
 class LoopConfig(BaseModel):
@@ -169,14 +184,25 @@ class AppConfig(BaseModel):
 
 
 class VisualIssue(BaseModel):
-    review_axis: Literal["camera_coverage", "shape", "graduations"] = (
-        "shape"
-    )
+    review_axis: Literal[
+        "camera_coverage",
+        "overall_shape",
+        "components_shape",
+        "graduations",
+    ] = "overall_shape"
     severity: Literal["critical", "major", "moderate", "minor"]
     view_names: list[str] = Field(default_factory=list)
     observation: str
     likely_cause: str
     recommended_change: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_axis(cls, value: object) -> object:
+        if isinstance(value, dict) and value.get("review_axis") == "shape":
+            value = dict(value)
+            value["review_axis"] = "overall_shape"
+        return value
 
 
 class HistoricalVisualIssue(VisualIssue):

@@ -6,7 +6,6 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .code_writer import CodeWriter
 from .models import (
     AppConfig,
     HistoricalVisualIssue,
@@ -16,12 +15,9 @@ from .models import (
 )
 from .openai_compatible import OpenAICompatibleClient
 from .prompts import (
-    REPAIR_SYSTEM_PROMPT,
     REVIEW_SYSTEM_PROMPT,
     build_human_hint_context,
     build_issue_history_context,
-    build_repair_context,
-    build_repair_prompt,
     build_reference_image_guidance,
     build_reference_pairing_guidance,
     build_revision_context,
@@ -46,24 +42,26 @@ def _print_parse_retry(label: str, attempt: int, exc: Exception) -> None:
 
 
 @dataclass
-class VisionCodeDecision:
+class VisualReviewResult:
     review: VLMReview
-    revised_script: str | None
-    summary: str
+    difference: str
     raw_response: str
     usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 @dataclass
-class ScriptRepair:
-    script: str
+class VisionCodeDecision:
+    review: VLMReview
+    revised_script: str | None
     summary: str
-    raw_response: str
+    difference: str
+    review_response: str
+    revision_response: str | None = None
     usage: TokenUsage = field(default_factory=TokenUsage)
 
 
-class VisionCodingAgent:
-    """One GPT call reviews renders and chooses pass, revision, or a view retake."""
+class VisualReviewer:
+    """Review rendered images with a vision-capable model and return JSON only."""
 
     def __init__(
         self,
@@ -72,7 +70,7 @@ class VisionCodingAgent:
         client: OpenAICompatibleClient | None = None,
     ) -> None:
         self.config = config
-        self.model_config = config.models.iterative_model
+        self.model_config = config.models.reviewer_model
         self.client = client or OpenAICompatibleClient(self.model_config)
         self.toolkit = ""
         self.docs = ""
@@ -93,7 +91,7 @@ class VisionCodingAgent:
     async def close(self) -> None:
         return None
 
-    async def review_and_revise(
+    async def review(
         self,
         spec: InstrumentSpec,
         script_path: Path,
@@ -102,9 +100,9 @@ class VisionCodingAgent:
         issue_history: list[HistoricalVisualIssue] | None = None,
         human_hint: str | None = None,
         reference_images: list[Path] = (),
-    ) -> VisionCodeDecision:
+    ) -> VisualReviewResult:
         if not images:
-            raise ValueError("No render images were supplied to the iterative generator.")
+            raise ValueError("No render images were supplied to the visual reviewer.")
         selected = list(images)
         reference_images = list(reference_images)
         pair_count = min(len(selected), len(reference_images))
@@ -168,11 +166,9 @@ class VisionCodingAgent:
                 }
             )
 
-        # Deliberately send no response_format. The response contains JSON review
-        # plus a long Python file, which is more reliable as tagged plain text.
-        partial_path = script_path.parent / "gpt_review_and_code_response.partial.txt"
-        final_response_path = script_path.parent / "gpt_review_and_code_response.txt"
         total_usage = TokenUsage()
+        partial_path = script_path.parent / "gpt_review_response.partial.txt"
+        final_response_path = script_path.parent / "gpt_review_response.txt"
         last_error: Exception | None = None
         for attempt in range(_PARSE_RETRIES):
             completion = await self.client.chat(
@@ -180,113 +176,43 @@ class VisionCodingAgent:
                     {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
                     {"role": "user", "content": content},
                 ],
-                stream_label=(
-                    f"GPT review+coder iteration {iteration} "
-                    f"({self.model_config.model})"
-                ),
+                stream_label=f"GPT visual review iteration {iteration} ({self.model_config.model})",
                 stream_output_path=partial_path,
             )
-            total_usage.add(completion.usage)
             text = completion.text
+            total_usage.add(completion.usage)
             final_response_path.write_text(text, encoding="utf-8")
             partial_path.unlink(missing_ok=True)
             try:
-                decision = self._parse_decision(text)
-                decision.usage = total_usage
-                return decision
-            except (ValueError, RuntimeError) as exc:
-                last_error = exc
-                _print_parse_retry(
-                    f"GPT review+coder iteration {iteration}",
-                    attempt + 1,
-                    exc,
-                )
-        assert last_error is not None
-        raise last_error
-
-    async def repair_render_failure(
-        self,
-        spec: InstrumentSpec,
-        script_path: Path,
-        iteration: int,
-        error: str,
-        issue_history: list[HistoricalVisualIssue] | None = None,
-        human_hint: str | None = None,
-        reference_images: list[Path] = (),
-    ) -> ScriptRepair:
-        reference_images = list(reference_images)
-        prompt = build_repair_prompt(
-            iteration=iteration,
-            spec_json=json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2),
-            repair_context=build_repair_context(rules=self.rules, toolkit=self.toolkit),
-            issue_history_context=build_issue_history_context(issue_history or []),
-            human_hint_context=build_human_hint_context(human_hint),
-            reference_guidance=build_reference_image_guidance(reference_images),
-            current_script=script_path.read_text(encoding="utf-8"),
-            error=error,
-        )
-        user_content: str | list[dict] = prompt
-        if reference_images:
-            user_content = [{"type": "text", "text": prompt}]
-            for image_path in reference_images:
-                user_content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": image_data_url(
-                                image_path,
-                                max_side=self.model_config.max_image_side,
-                                jpeg_quality=self.model_config.jpeg_quality,
-                            )
-                        },
-                    }
-                )
-        partial_path = script_path.parent / "repair_agent_response.partial.txt"
-        final_response_path = script_path.parent / "repair_agent_response.txt"
-        total_usage = TokenUsage()
-        last_error: Exception | None = None
-        for attempt in range(_PARSE_RETRIES):
-            completion = await self.client.chat(
-                [
-                    {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                stream_label=(
-                    f"GPT render repair iteration {iteration} "
-                    f"({self.model_config.model})"
-                ),
-                stream_output_path=partial_path,
-            )
-            total_usage.add(completion.usage)
-            text = completion.text
-            final_response_path.write_text(text, encoding="utf-8")
-            partial_path.unlink(missing_ok=True)
-            try:
-                script, summary = CodeWriter._parse_response(text)
-                return ScriptRepair(
-                    script=script,
-                    summary=summary,
+                difference = self._parse_difference(text)
+                return VisualReviewResult(
+                    review=self._parse_review(text),
+                    difference=difference,
                     raw_response=text,
                     usage=total_usage,
                 )
             except (ValueError, RuntimeError) as exc:
                 last_error = exc
-                _print_parse_retry(
-                    f"GPT render repair iteration {iteration}",
-                    attempt + 1,
-                    exc,
-                )
+                _print_parse_retry("GPT visual review", attempt + 1, exc)
         assert last_error is not None
         raise last_error
 
-    def write_revision(self, decision: VisionCodeDecision, candidate_path: Path) -> None:
-        if decision.revised_script is None:
-            raise RuntimeError("The GPT decision did not contain a revised script.")
-        candidate_path.parent.mkdir(parents=True, exist_ok=True)
-        candidate_path.write_text(decision.revised_script.rstrip() + "\n", encoding="utf-8")
+    @classmethod
+    def _parse_difference(cls, text: str) -> str:
+        difference_match = re.search(
+            r"<DIFFERENCE>\s*(.*?)\s*</DIFFERENCE>",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not difference_match:
+            raise RuntimeError("GPT response is missing <DIFFERENCE>.")
+        difference = difference_match.group(1).strip()
+        if not difference:
+            raise RuntimeError("GPT <DIFFERENCE> section is empty.")
+        return difference
 
     @classmethod
-    def _parse_decision(cls, text: str) -> VisionCodeDecision:
+    def _parse_review(cls, text: str) -> VLMReview:
         review_match = re.search(
             r"<REVIEW_JSON>\s*(.*?)\s*</REVIEW_JSON>",
             text,
@@ -305,8 +231,6 @@ class VisionCodingAgent:
         for issue_index, issue in enumerate(issues_payload, start=1):
             if not isinstance(issue, dict):
                 raise RuntimeError(f"GPT review issue {issue_index} must be a JSON object.")
-            # Keep old manifests readable, but never expose/store new minor findings.
-            # Minor observations are deliberately omitted from the actionable protocol.
             if issue.get("severity") == "minor":
                 continue
             if "review_axis" not in issue:
@@ -333,30 +257,4 @@ class VisionCodingAgent:
                     "uncertain geometry must not be diagnosed before retaking views."
                 )
 
-        summary = review.summary
-
-        script_match = re.search(
-            r"<BLENDER_SCRIPT>\s*(.*?)\s*</BLENDER_SCRIPT>",
-            text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        script = None
-        if script_match:
-            script = CodeWriter._strip_code_fence(script_match.group(1))
-            if not script:
-                script = None
-
-        if review.verdict in {"revise", "retake_views"} and script is None:
-            raise RuntimeError(
-                f"GPT returned verdict={review.verdict} but omitted the complete <BLENDER_SCRIPT>."
-            )
-        if script is not None and not CodeWriter._looks_like_python_script(script):
-            raise RuntimeError("GPT returned a <BLENDER_SCRIPT> that is not recognizable as Blender Python.")
-
-        return VisionCodeDecision(
-            review=review,
-            revised_script=script,
-            summary=summary,
-            raw_response=text,
-        )
-
+        return review

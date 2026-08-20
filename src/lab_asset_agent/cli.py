@@ -186,13 +186,13 @@ def batch(
 def ping(
     model: str = typer.Argument(
         None,
-        help="Model source name from models.providers (default: iterative_generator).",
+        help="Model source name from models.providers (default: visual_reviewer).",
     ),
     config: Path = typer.Option(Path("config.yaml"), "--config", "-c", exists=True, dir_okay=False),
 ) -> None:
     """Send a one-word hello to a configured model source to verify connectivity."""
     cfg = load_config(config)
-    name = model or cfg.models.iterative_generator
+    name = model or cfg.models.visual_reviewer
     if name not in cfg.models.providers:
         raise typer.BadParameter(
             f"Unknown model source '{name}'. Available: {', '.join(cfg.models.providers)}"
@@ -227,10 +227,12 @@ def check_config(
     table.add_row("Rules", str(cfg.paths.rules), str(cfg.paths.rules.exists()))
     for name, model_cfg in cfg.models.providers.items():
         roles = []
-        if name == cfg.models.initial_generator:
-            roles.append("initial")
-        if name == cfg.models.iterative_generator:
-            roles.append("iterative")
+        if name == cfg.models.initial_coder:
+            roles.append("initial_coder")
+        if name == cfg.models.visual_reviewer:
+            roles.append("visual_reviewer")
+        if name == cfg.models.iterative_coder:
+            roles.append("iterative_coder")
         role_text = f" ({', '.join(roles)})" if roles else ""
         table.add_row(
             f"Model {name}{role_text}",

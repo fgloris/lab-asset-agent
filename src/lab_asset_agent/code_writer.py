@@ -2,25 +2,65 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import AppConfig, InstrumentSpec, ModelConfig, TokenUsage
+from .models import (
+    AppConfig,
+    HistoricalVisualIssue,
+    InstrumentSpec,
+    ModelConfig,
+    TokenUsage,
+    VLMReview,
+)
 from .openai_compatible import OpenAICompatibleClient
 from .prompts import (
+    CODE_REVISE_SYSTEM_PROMPT,
     INITIAL_WRITER_SYSTEM_PROMPT,
+    REPAIR_SYSTEM_PROMPT,
+    build_human_hint_context,
     build_initial_prompt,
+    build_issue_history_context,
     build_reference_image_guidance,
+    build_repair_context,
+    build_repair_prompt,
+    build_revision_context,
+    build_revision_prompt,
     build_shared_context,
 )
 from .utils import extract_json_object, image_data_url
 
 
-class CodeWriter:
-    """Generate only the initial Blender script.
+_PARSE_RETRIES = 3
 
-    The model can be DeepSeek or the same GPT endpoint used by the iteration
-    agent. All post-render reasoning and revisions are intentionally handled by
-    :class:`VisionCodingAgent` in one multimodal request.
+
+def _print_parse_retry(label: str, attempt: int, exc: Exception) -> None:
+    message = str(exc).replace("\n", " ")
+    if len(message) > 240:
+        message = message[:237] + "..."
+    print(
+        f"[lab-asset-agent] {label}: parse failed on attempt "
+        f"{attempt}/{_PARSE_RETRIES}; retrying. Reason: {message}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+@dataclass
+class ScriptWriteResult:
+    script: str
+    raw_response: str
+    usage: TokenUsage = field(default_factory=TokenUsage)
+
+
+class CodeWriter:
+    """Write Blender scripts from text context.
+
+    The same class handles the initial script, iterative code revisions based
+    on a visual review JSON, and render-error repairs. A caller may pass any
+    configured text or vision model; images are sent only for the initial route
+    when that selected model supports them.
     """
 
     def __init__(
@@ -82,6 +122,89 @@ class CodeWriter:
             reference_images=reference_images if send_images else (),
         )
 
+    async def revise_from_review(
+        self,
+        spec: InstrumentSpec,
+        script_path: Path,
+        iteration: int,
+        review: VLMReview,
+        issue_history: list[HistoricalVisualIssue] | None = None,
+        human_hint: str | None = None,
+    ) -> ScriptWriteResult:
+        prompt = build_revision_prompt(
+            iteration=iteration,
+            review_verdict=review.verdict,
+            spec_json=json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            revision_context=build_revision_context(
+                rules=self.rules, docs=self.docs, toolkit=self.toolkit
+            ),
+            issue_history_context=build_issue_history_context(issue_history or []),
+            human_hint_context=build_human_hint_context(human_hint),
+            review_json=json.dumps(review.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            current_script=script_path.read_text(encoding="utf-8"),
+        )
+        return await self._complete_script_with_retries(
+            messages=[
+                {"role": "system", "content": CODE_REVISE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            label=f"GPT revision iteration {iteration}",
+            stream_label=f"GPT revision iteration {iteration} ({self.model_config.model})",
+            partial_path=script_path.parent / "gpt_revision_response.partial.txt",
+            final_response_path=script_path.parent / "gpt_revision_response.txt",
+        )
+
+    async def repair_render_failure(
+        self,
+        spec: InstrumentSpec,
+        script_path: Path,
+        iteration: int,
+        error: str,
+        issue_history: list[HistoricalVisualIssue] | None = None,
+        human_hint: str | None = None,
+        reference_images: list[Path] = (),
+    ) -> ScriptWriteResult:
+        reference_images = list(reference_images)
+        send_images = self.model_config.vision and bool(reference_images)
+        prompt = build_repair_prompt(
+            iteration=iteration,
+            spec_json=json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            repair_context=build_repair_context(rules=self.rules, toolkit=self.toolkit),
+            issue_history_context=build_issue_history_context(issue_history or []),
+            human_hint_context=build_human_hint_context(human_hint),
+            reference_guidance=(
+                build_reference_image_guidance(reference_images) if send_images else ""
+            ),
+            current_script=script_path.read_text(encoding="utf-8"),
+            error=error,
+        )
+        user_content: str | list[dict] = prompt
+        if send_images:
+            user_content = [{"type": "text", "text": prompt}]
+            for image_path in reference_images:
+                user_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_data_url(
+                                image_path,
+                                max_side=self.model_config.max_image_side,
+                                jpeg_quality=self.model_config.jpeg_quality,
+                            )
+                        },
+                    }
+                )
+        return await self._complete_script_with_retries(
+            messages=[
+                {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            label=f"GPT render repair iteration {iteration}",
+            stream_label=f"GPT render repair iteration {iteration} ({self.model_config.model})",
+            partial_path=script_path.parent / "repair_agent_response.partial.txt",
+            final_response_path=script_path.parent / "repair_agent_response.txt",
+        )
+
     async def _complete_and_write(
         self,
         prompt: str,
@@ -119,13 +242,51 @@ class CodeWriter:
         # output remains inspectable and a successful request is never opaque.
         final_response_path.write_text(text, encoding="utf-8")
         partial_path.unlink(missing_ok=True)
-        script, summary = self._parse_response(text)
+        script = self._parse_response(text)
         candidate_path.parent.mkdir(parents=True, exist_ok=True)
         candidate_path.write_text(script.rstrip() + "\n", encoding="utf-8")
-        return summary, completion.usage
+        return "Initial coder generated the candidate script.", completion.usage
+
+    async def _complete_script_with_retries(
+        self,
+        *,
+        messages: list[dict],
+        label: str,
+        stream_label: str,
+        partial_path: Path,
+        final_response_path: Path,
+    ) -> ScriptWriteResult:
+        total_usage = TokenUsage()
+        last_error: Exception | None = None
+        for attempt in range(_PARSE_RETRIES):
+            completion = await self.client.chat(
+                messages,
+                stream_label=stream_label,
+                stream_output_path=partial_path,
+            )
+            text = completion.text
+            total_usage.add(completion.usage)
+            final_response_path.write_text(text, encoding="utf-8")
+            partial_path.unlink(missing_ok=True)
+            try:
+                script = self._parse_response(text)
+                if not self._looks_like_python_script(script):
+                    raise RuntimeError(
+                        "Model returned a <BLENDER_SCRIPT> that is not recognizable as Blender Python."
+                    )
+                return ScriptWriteResult(
+                    script=script,
+                    raw_response=text,
+                    usage=total_usage,
+                )
+            except (ValueError, RuntimeError) as exc:
+                last_error = exc
+                _print_parse_retry(label, attempt + 1, exc)
+        assert last_error is not None
+        raise last_error
 
     @classmethod
-    def _parse_response(cls, text: str) -> tuple[str, str]:
+    def _parse_response(cls, text: str) -> str:
         """Extract a complete script from tagged, JSON, fenced, or raw output."""
 
         tagged_script = re.search(
@@ -134,20 +295,10 @@ class CodeWriter:
             flags=re.IGNORECASE | re.DOTALL,
         )
         if tagged_script:
-            tagged_summary = re.search(
-                r"<SUMMARY>\s*(.*?)\s*</SUMMARY>",
-                text,
-                flags=re.IGNORECASE | re.DOTALL,
-            )
             script = cls._strip_code_fence(tagged_script.group(1))
-            summary = (
-                tagged_summary.group(1).strip()
-                if tagged_summary
-                else "The initial writer generated the candidate script."
-            )
             if not script:
                 raise RuntimeError("Initial-writer response contained an empty <BLENDER_SCRIPT> section.")
-            return script, summary
+            return script
 
         try:
             payload = extract_json_object(text)
@@ -156,20 +307,17 @@ class CodeWriter:
         if isinstance(payload, dict):
             script = payload.get("script")
             if isinstance(script, str) and script.strip():
-                return (
-                    cls._strip_code_fence(script),
-                    str(payload.get("summary") or "The initial writer generated the candidate script."),
-                )
+                return cls._strip_code_fence(script)
 
         fenced = re.search(r"```(?:python)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL)
         if fenced:
             script = cls._strip_code_fence(fenced.group(1))
             if script:
-                return script, "The initial writer returned a complete fenced Python script."
+                return script
 
         raw = text.strip()
         if cls._looks_like_python_script(raw):
-            return raw, "The initial writer returned a complete Python script."
+            return raw
 
         raise RuntimeError(
             "Initial-writer response did not contain <BLENDER_SCRIPT>, a legacy JSON `script`, "

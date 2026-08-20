@@ -74,20 +74,32 @@ def build_reference_pairing_guidance(pair_count: int, extra_count: int) -> str:
     return "\n".join(lines)
 
 
+REVIEW_AXIS_GUIDANCE = """review_axis 只能是以下四类：
+- `camera_coverage`：画面是否覆盖完整、角度是否足够
+- `overall_shape`：整体轮廓、纵横比、主外形比例、重心感
+- `components_shape`：局部部件几何、连接方式、口沿、底部、支管、把手、塞子、刻度带等
+- `graduations`：刻度、标签、零点、等体积间距和读数逻辑
+"""
+
+RECOMMENDED_CHANGE_RULE = """`recommended_change` 必须是可执行、可验证、尽量定量的修改指令，优先使用以下形式：
+- 尺寸：给出 mm、比例、角度、偏移量、数量
+- 相机：给出方位变化、仰角变化、距离变化、是否保留焦点
+- 刻度：给出起点、终点、间隔、数量、是否重算体积分布
+- 组件：给出增减高度、厚度、外扩/内收、位置偏移、圆角半径
+禁止只写“略微调整”“更自然”“更像一点”这类不可执行表述。"""
+
+
 # ===========================================================================
 # 首版脚本生成（code_writer.CodeWriter）
-# 注入时机：generate 开始时，initial_generator 调用一次。
+# 注入时机：generate 开始时，initial_coder 调用一次。
 # ===========================================================================
 
 INITIAL_WRITER_SYSTEM_PROMPT = (
-    """你是 Blender 5.2 Python 工程师。严格遵守脚本契约，并只返回以下两部分：
+    """你是 Blender 5.2 Python 工程师。严格遵守脚本契约，并只返回以下部分：
 
 <BLENDER_SCRIPT>
 一个完整可执行的 Python 文件，不要使用 Markdown 代码围栏。
 </BLENDER_SCRIPT>
-<SUMMARY>
-一段简洁的设计摘要（中文）。
-</SUMMARY>
 
 不要返回补丁，不要修改提供的上下文。通用安全约束：禁止网络访问、子进程、shell 命令、eval、exec
 或破坏性文件系统操作。"""
@@ -135,18 +147,25 @@ def build_initial_prompt(
 """
 
 # ===========================================================================
-# 评审 + 改代码（vision_coding_agent.VisionCodingAgent.review_and_revise）
-# 注入时机：每次 Blender 成功渲染后，给 iterative_generator 的多模态请求。
+# 评审（vision_coding_agent.VisualReviewer.review）
+# 注入时机：每次 Blender 成功渲染后，给 visual_reviewer 的多模态请求。
 # ===========================================================================
 
 REVIEW_SYSTEM_PROMPT = (
-    """你是视觉质检工程师兼 Blender 5.2 Python 工程师。联合评判所有提供的渲染图、目标规格和精确脚本。
-报告可执行的 `minor`、`moderate`、`major`、`critical` 问题；省略外观偏好。每个问题必须使用且只能使用一个 review_axis：
-- `camera_coverage`：可见性门槛，如需要调整则会应优先执行。首先确保前面的渲染视角必须分别与对应顺序的目标参考图一致，然后检查整体覆盖、有效角度多样性和可读比例。
-若视角存在不足，选择`retake_views`；不要因为物体没有拍全，就认为其有几何缺失。
-- `shape`：这是最重要的维度。仪器整体形态比例必须与参考图大致相似，对这一点一定要反复比对。其次是部件上的几何。检查开口、口沿(向上还是向下)、壁厚、底部、接头、侧面部件、
-  物理连接和拓扑。在总体形态比例上必须把每一张当前渲染图与对应/相关的参考产品图逐项对比，指出具体比例或结构偏差，或是从功能的角度(由于参考图上部件细节往往难分辨)指出部件几何存在错误。
-- `graduations`：检查可见刻度/标签/附着，以及精确的体积积分代码，包括真实零体积原点。非均匀容器中等体积刻度间距不均是正常现象。
+    """你是视觉质检工程师。联合评判所有提供的渲染图、目标规格和精确脚本。
+先输出参考图与渲染图的视觉差异，再输出视觉评审 JSON；不要输出脚本。报告可执行的 `minor`、`moderate`、`major`、`critical` 问题；省略外观偏好。
+
+<DIFFERENCE> 必须在 <REVIEW_JSON> 之前。用中文按参考图/渲染图配对逐项描述可见差异，重点覆盖整体轮廓、比例、部件布局、局部几何、刻度/标签和相机覆盖。
+没有参考图时，改为描述渲染图与目标文字规格之间的差异。不要在此处给代码方案，只记录视觉事实和不确定性。
+
+每个问题必须使用且只能使用一个 review_axis：
+- `camera_coverage`：可见性门槛，如需要调整则优先执行。先判断当前视角是否覆盖完整，再看角度多样性和遮挡。
+- `overall_shape`：整体轮廓、纵横比、重心、主外形是否匹配参考图。
+- `components_shape`：局部部件几何、连接方式、口沿、底部、支管、塞子、把手、刻度带等是否匹配。
+- `graduations`：检查可见刻度/标签/附着，以及精确的体积积分代码，包括真实零体积原点。
+
+如果需要重新拍图，只能使用 `camera_coverage`，且不得夹带几何判断。
+如果需要修改几何，优先拆成 `overall_shape` 和 `components_shape`。
 
 similarity_score 如何计算：
 - 逐对对比参考图和对应视角，从 0-10 为外形/比例/轮廓的相似度打分，得到 similarity_scores。
@@ -154,14 +173,18 @@ similarity_score 如何计算：
 
 决策规则：
 - `retake_views`：仅修改相机位置、目标/镜头和诊断视角定义。几何、材质、标识、尺寸、刻度计算必须原样保留。
-- `revise`：视角覆盖充分且至少存在一个 moderate 或以上 shape/graduation 问题需要修复；返回完整修正后的脚本。
+- `revise`：视角覆盖充分且至少存在一个 moderate 或以上 overall_shape/components_shape/graduations 问题需要修复；返回完整修正后的脚本。
 - `pass`：覆盖充分且不再存在 moderate 及以上缺陷。
 
-覆盖充分时，shape 重要性约占 80%，graduations 约占 20%。忽略暗部、弱反射/高光、表观透明度、曝光、
+覆盖充分时，overall_shape 重要性约占 50%，components_shape 约占 30%，graduations 约占 20%。忽略暗部、弱反射/高光、表观透明度、曝光、
 对比度、阴影以及其他光照/渲染风格差异；但不得用这些风格理由掩盖真实几何差异。绝不要通过修改相机或渲染
 来掩盖真实缺陷。
 
-输出格式必须严格如下（标签名 <REVIEW_JSON> 和 <BLENDER_SCRIPT> 保持英文，不要使用 Markdown 代码围栏）：
+输出格式必须严格包含（标签名 <DIFFERENCE> 和 <REVIEW_JSON> 保持英文，不要使用 Markdown 代码围栏）：
+
+<DIFFERENCE>
+参考图与当前渲染图的差异说明。
+</DIFFERENCE>
 
 <REVIEW_JSON>
 一个合法 JSON 对象。字段名(key)和枚举值必须完全使用下面的英文，不得翻译或改写；字段内容(value)可用中文。
@@ -170,19 +193,21 @@ similarity_score 如何计算：
 - `similarity_score`: 0 到 10 的小数
 - `issues`: 数组，每项字段为 `review_axis`、`severity`、`view_names`、`observation`、`likely_cause`、
   `recommended_change`
-  - `review_axis`: `camera_coverage` | `shape` | `graduations`
+  - `review_axis`: `camera_coverage` | `overall_shape` | `components_shape` | `graduations`
   - `severity`: `moderate` | `major` | `critical`
   - `view_names`: 字符串数组，填写问题涉及的渲染视角文件名
   - `observation`、`likely_cause`、`recommended_change`: 字符串，可用中文
+  - `recommended_change` 必须定量、可执行、可验证，不能只写模糊描述
 - `preserve`: 字符串数组，列出必须保留的正确内容
 - `summary`: 字符串，可用中文
 </REVIEW_JSON>
-<BLENDER_SCRIPT>
-当 verdict 为 revise 或 retake_views 时，本段为完整可执行的 Python 文件。pass 时省略本段。
-</BLENDER_SCRIPT>
 
 """
     + _ASSET_GUIDANCE
+    + "\n\n"
+    + REVIEW_AXIS_GUIDANCE
+    + "\n\n"
+    + RECOMMENDED_CHANGE_RULE
     + "\n\n"
     + COMMON_SAFETY
 )
@@ -200,6 +225,67 @@ BLENDER/项目文档:
 ```python
 {toolkit}
 ```"""
+
+
+CODE_REVISE_SYSTEM_PROMPT = (
+    """你是 Blender 5.2 Python 工程师。你不会看到图片，只能根据上一轮视觉评审 JSON、目标规格和精确脚本修订代码。
+只返回以下部分：
+
+<BLENDER_SCRIPT>
+完整修正后的可执行 Python 文件，不是补丁。
+</BLENDER_SCRIPT>
+
+必须严格执行以下约束：
+- 只根据 review 里明确列出的问题改代码
+- 保留 review 中 `preserve` 列出的内容
+- `recommended_change` 是定量指令时，要把它落实成具体数值、比例或角度
+- 不要重新评判图像，不要猜测看不见的细节
+- 如果 review.verdict == `retake_views`，只能修改相机位置、目标、镜头、诊断视角定义；不得修改几何、材质、尺寸、刻度、标签、部件拓扑
+- 如果 review.verdict == `revise`，只修改 review 中列出的 `overall_shape` / `components_shape` / `graduations` 问题
+"""
+    + _ASSET_GUIDANCE
+    + "\n\n"
+    + COMMON_SAFETY
+)
+
+
+def build_revision_prompt(
+    *,
+    iteration: int,
+    review_verdict: str,
+    spec_json: str,
+    revision_context: str,
+    issue_history_context: str,
+    human_hint_context: str,
+    review_json: str,
+    current_script: str,
+) -> str:
+    return f"""当前是第 {iteration} 轮修订。你不会看到图片，只依据 review JSON 改代码。
+
+本轮 verdict: {review_verdict}
+如果 verdict 是 `retake_views`，只能改相机位置、目标、镜头和诊断视角定义；不得改几何、材质、尺寸、刻度或标签。
+如果 verdict 是 `revise`，只根据 review 里列出的 `overall_shape` / `components_shape` / `graduations` 问题改代码。
+
+目标规格:
+{spec_json}
+
+{revision_context}
+
+{issue_history_context}
+
+{human_hint_context}
+
+上一轮视觉评审 JSON:
+```json
+{review_json}
+```
+
+当前精确仪器脚本:
+```python
+{current_script}
+```
+
+请输出完整修正后的 Python 文件。"""
 
 
 def build_issue_history_context(issue_history: Sequence[HistoricalVisualIssue]) -> str:
@@ -262,17 +348,14 @@ def build_review_prompt(
 """
 
 # ===========================================================================
-# 渲染失败修复（vision_coding_agent.VisionCodingAgent.repair_render_failure）
-# 注入时机：静态校验或 Blender 执行失败时，给 iterative_generator 的修复请求。
+# 渲染失败修复（code_writer.CodeWriter.repair_render_failure）
+# 注入时机：静态校验或 Blender 执行失败时，给 iterative_coder 的修复请求。
 # ===========================================================================
 
 REPAIR_SYSTEM_PROMPT = (
     """你是 Blender 5.2 Python 工程师，负责修复未通过校验或执行失败的脚本。诊断精确脚本和错误日志，
-做最小且稳健的修复，并保留正确几何。只返回以下两部分：
+做最小且稳健的修复，并保留正确几何。只返回以下部分：
 
-<SUMMARY>
-简洁的原因和修复摘要（可用中文）。
-</SUMMARY>
 <BLENDER_SCRIPT>
 完整修正后的可执行 Python 文件，不是补丁。
 </BLENDER_SCRIPT>

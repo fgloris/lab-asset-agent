@@ -17,7 +17,7 @@ from .models import (
     TokenUsage,
 )
 from .utils import sha256_file, utc_run_id, write_json
-from .vision_coding_agent import VisionCodeDecision, VisionCodingAgent
+from .vision_coding_agent import VisionCodeDecision, VisualReviewer
 
 
 class AssetGenerationOrchestrator:
@@ -31,15 +31,16 @@ class AssetGenerationOrchestrator:
         self.config = config
         self.console = console or Console()
         self.blender = BlenderRunner(config)
-        self.iterative_agent = VisionCodingAgent(config)
+        self.visual_reviewer = VisualReviewer(config)
+        self.iterative_coder = CodeWriter(config, config.models.iterative_model)
         self.human_hint = human_hint.strip() if human_hint and human_hint.strip() else None
 
     async def run(self, spec: InstrumentSpec) -> RunManifest:
         """Start a new run.
 
         Only the initial script is routed through the configurable initial
-        generator. After the first render, GPT reviews images and code and writes
-        the next candidate in the same multimodal request.
+        coder. After the first render, the visual reviewer emits JSON and the
+        iterative coder writes the next candidate from that text review.
         """
 
         self._validate_inputs()
@@ -67,7 +68,7 @@ class AssetGenerationOrchestrator:
         try:
             await initial_agent.start()
             initial_started = True
-            route = self.config.models.initial_generator
+            route = self.config.models.initial_coder
             model = self.config.models.initial_model.model
             self.console.print(
                 f"[cyan]Calling initial generator[/cyan]: {model} (route={route})..."
@@ -80,7 +81,8 @@ class AssetGenerationOrchestrator:
             self.console.print(f"[green]Initial script saved[/green]: {candidate_path}")
             self._restore_protected_files(protected)
 
-            await self.iterative_agent.start()
+            await self.visual_reviewer.start()
+            await self.iterative_coder.start()
             agent_started = True
             return await self._iterate(
                 spec=spec,
@@ -100,15 +102,17 @@ class AssetGenerationOrchestrator:
             if initial_started:
                 await initial_agent.close()
             if agent_started:
-                await self.iterative_agent.close()
+                await self.visual_reviewer.close()
+                await self.iterative_coder.close()
             self._restore_protected_files(protected)
 
     async def resume(self, run_dir: Path, from_iteration: int | None = None) -> RunManifest:
         """Resume without repeating a completed initial-generation request.
 
         v0.2 manifests are supported. If an old run has renders and a separate
-        review but no revised candidate, the iterative generator receives the
-        exact script plus those renders and performs review+revision in one call.
+        review but no revised candidate, the split reviewer/coder pipeline
+        receives the exact script plus those renders and produces a fresh next
+        script.
         """
 
         self._validate_inputs()
@@ -160,7 +164,8 @@ class AssetGenerationOrchestrator:
         protected = self._snapshot_protected_files()
         agent_started = False
         try:
-            await self.iterative_agent.start()
+            await self.visual_reviewer.start()
+            await self.iterative_coder.start()
             agent_started = True
 
             repeated_hashes = {record.script_sha256 for record in manifest.iterations}
@@ -174,9 +179,9 @@ class AssetGenerationOrchestrator:
                 candidate_hash = sha256_file(candidate_path)
                 start_iteration = last.iteration + 1
 
-                # The combined GPT response is persisted before the workspace
-                # candidate is overwritten. Recover it if interruption occurred
-                # in that tiny window, avoiding a duplicate paid GPT call.
+                # The split reviewer/coder response is persisted before the
+                # workspace candidate is overwritten. Recover it if interruption
+                # occurred in that tiny window, avoiding duplicate paid calls.
                 stored_next = (
                     run_dir
                     / f"iteration_{last.iteration:02d}"
@@ -212,17 +217,19 @@ class AssetGenerationOrchestrator:
                             f"Iteration {last.iteration} was marked rendered but no PNG files exist."
                         )
                     self.console.print(
-                        f"[cyan]Calling GPT review+coder[/cyan]: "
+                        f"[cyan]Calling visual reviewer + coder[/cyan]: "
+                        f"{self.config.models.reviewer_model.model} -> "
                         f"{self.config.models.iterative_model.model} with code and "
                         f"{len(last.render.images)} existing image(s)..."
                     )
-                    decision = await self.iterative_agent.review_and_revise(
+                    decision = await self._review_and_revise(
                         spec,
                         self._record_script_path(run_dir, last),
                         last.render.images,
                         last.iteration,
                         issue_history=self._collect_issue_history(manifest),
                         human_hint=self._human_hint_for(),
+                        reference_images=spec.reference_images,
                     )
                     manifest.token_usage.add(decision.usage)
                     self._save_decision(run_dir, manifest, last, decision)
@@ -231,8 +238,8 @@ class AssetGenerationOrchestrator:
                     if self._review_passes(decision.review):
                         self._finalize_passed(run_dir, spec, manifest, last)
                         return manifest
-                    self.iterative_agent.write_revision(decision, candidate_path)
-                    writer_summary = decision.summary
+                    self._write_revision(decision, candidate_path)
+                    writer_summary = "Iterative coder revised the script from visual review JSON."
                     self._print_revision_saved(decision)
                     self._restore_protected_files(protected)
                 else:
@@ -240,7 +247,7 @@ class AssetGenerationOrchestrator:
                         f"[cyan]Calling GPT repair agent[/cyan]: "
                         f"{self.config.models.iterative_model.model} with code and Blender log..."
                     )
-                    repair = await self.iterative_agent.repair_render_failure(
+                    repair = await self.iterative_coder.repair_render_failure(
                         spec,
                         self._record_script_path(run_dir, last),
                         last.iteration,
@@ -251,7 +258,7 @@ class AssetGenerationOrchestrator:
                     manifest.token_usage.add(repair.usage)
                     write_json(manifest_path, manifest)
                     candidate_path.write_text(repair.script.rstrip() + "\n", encoding="utf-8")
-                    writer_summary = repair.summary
+                    writer_summary = "Iterative coder repaired the render failure."
                     iteration_dir = run_dir / f"iteration_{last.iteration:02d}"
                     (iteration_dir / "repair_agent_response.txt").write_text(
                         repair.raw_response, encoding="utf-8"
@@ -290,7 +297,8 @@ class AssetGenerationOrchestrator:
             raise
         finally:
             if agent_started:
-                await self.iterative_agent.close()
+                await self.visual_reviewer.close()
+                await self.iterative_coder.close()
             self._restore_protected_files(protected)
 
     async def _iterate(
@@ -360,7 +368,7 @@ class AssetGenerationOrchestrator:
                     f"[cyan]Calling GPT repair agent[/cyan]: "
                     f"{self.config.models.iterative_model.model} with current code and Blender log..."
                 )
-                repair = await self.iterative_agent.repair_render_failure(
+                repair = await self.iterative_coder.repair_render_failure(
                     spec,
                     script_snapshot,
                     iteration,
@@ -372,7 +380,7 @@ class AssetGenerationOrchestrator:
                 manifest.token_usage.add(repair.usage)
                 write_json(manifest_path, manifest)
                 candidate_path.write_text(repair.script.rstrip() + "\n", encoding="utf-8")
-                writer_summary = repair.summary
+                writer_summary = "Iterative coder repaired the render failure."
                 (iteration_dir / "repair_agent_response.txt").write_text(
                     repair.raw_response, encoding="utf-8"
                 )
@@ -383,11 +391,12 @@ class AssetGenerationOrchestrator:
 
             consecutive_render_failures = 0
             self.console.print(
-                f"[cyan]Calling GPT review+coder[/cyan]: "
+                f"[cyan]Calling visual reviewer + coder[/cyan]: "
+                f"{self.config.models.reviewer_model.model} -> "
                 f"{self.config.models.iterative_model.model} with exact code and "
                 f"{len(render.images)} image(s)..."
             )
-            decision = await self.iterative_agent.review_and_revise(
+            decision = await self._review_and_revise(
                 spec,
                 script_snapshot,
                 render.images,
@@ -405,8 +414,8 @@ class AssetGenerationOrchestrator:
                 self._finalize_passed(run_dir, spec, manifest, record)
                 break
 
-            self.iterative_agent.write_revision(decision, candidate_path)
-            writer_summary = decision.summary
+            self._write_revision(decision, candidate_path)
+            writer_summary = "Iterative coder revised the script from visual review JSON."
             self._print_revision_saved(decision)
             self._restore_protected_files(protected)
         else:
@@ -433,9 +442,16 @@ class AssetGenerationOrchestrator:
                 shutil.copy2(legacy_review, backup)
         record.review = decision.review
         write_json(legacy_review, decision.review)
-        (iteration_dir / "gpt_review_and_code_response.txt").write_text(
-            decision.raw_response, encoding="utf-8"
+        (iteration_dir / "difference.txt").write_text(
+            decision.difference.rstrip() + "\n", encoding="utf-8"
         )
+        (iteration_dir / "gpt_review_response.txt").write_text(
+            decision.review_response, encoding="utf-8"
+        )
+        if decision.revision_response is not None:
+            (iteration_dir / "gpt_revision_response.txt").write_text(
+                decision.revision_response, encoding="utf-8"
+            )
         if decision.revised_script is not None:
             (iteration_dir / "next_instrument.py").write_text(
                 decision.revised_script.rstrip() + "\n", encoding="utf-8"
@@ -445,6 +461,64 @@ class AssetGenerationOrchestrator:
             run_dir / "issue_history.json",
             [item.model_dump(mode="json") for item in self._collect_issue_history(manifest)],
         )
+
+    async def _review_and_revise(
+        self,
+        spec: InstrumentSpec,
+        script_path: Path,
+        images: list[Path],
+        iteration: int,
+        issue_history: list[HistoricalVisualIssue] | None = None,
+        human_hint: str | None = None,
+        reference_images: list[Path] = (),
+    ) -> VisionCodeDecision:
+        review_result = await self.visual_reviewer.review(
+            spec,
+            script_path,
+            images,
+            iteration,
+            issue_history=issue_history,
+            human_hint=human_hint,
+            reference_images=reference_images,
+        )
+        total_usage = TokenUsage()
+        total_usage.add(review_result.usage)
+
+        if review_result.review.verdict == "pass":
+            return VisionCodeDecision(
+                review=review_result.review,
+                revised_script=None,
+                summary=review_result.review.summary,
+                difference=review_result.difference,
+                review_response=review_result.raw_response,
+                usage=total_usage,
+            )
+
+        revision = await self.iterative_coder.revise_from_review(
+            spec,
+            script_path,
+            iteration,
+            review_result.review,
+            issue_history=issue_history,
+            human_hint=human_hint,
+        )
+        total_usage.add(revision.usage)
+        return VisionCodeDecision(
+            review=review_result.review,
+            revised_script=revision.script,
+            summary="Iterative coder revised the script from visual review JSON.",
+            difference=review_result.difference,
+            review_response=review_result.raw_response,
+            revision_response=revision.raw_response,
+            usage=total_usage,
+        )
+
+    @staticmethod
+    def _write_revision(decision: VisionCodeDecision, candidate_path: Path) -> None:
+        if decision.revised_script is None:
+            raise RuntimeError("The GPT decision did not contain a revised script.")
+        candidate_path.parent.mkdir(parents=True, exist_ok=True)
+        candidate_path.write_text(decision.revised_script.rstrip() + "\n", encoding="utf-8")
 
     def _finalize_passed(
         self,
