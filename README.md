@@ -98,6 +98,7 @@ models:
 loop:
   max_iterations: 8
   pass_score: 8.5
+  issue_history_window: 5
   keep_all_iterations: true
   stop_on_repeated_script: true
   max_consecutive_render_failures: 3
@@ -285,7 +286,7 @@ runs/<run-id>/
 ├── candidate.initial_response.txt       # 首版模型的原始响应
 ├── spec.json
 ├── manifest.json
-├── issue_history.json                  # 全部历史 moderate / major / critical 问题（跨轮记忆）
+├── issue_history.json                  # 全部历史 moderate / major / critical 问题（跨轮归档）
 ├── iteration_01/
 │   ├── instrument.py                     # 产生本轮图片的精确脚本快照
 │   ├── render/
@@ -326,7 +327,7 @@ src/lab_asset_agent/prompts.py
 | --- | --- | --- |
 | `REVIEW_SYSTEM_PROMPT` | system | 每次成功渲染后的 GPT 评审 + 改写请求（`VisionCodingAgent.review_and_revise`），要求返回 `<REVIEW_JSON>` 与完整 `<BLENDER_SCRIPT>` |
 | `build_revision_context()` | user 片段 | 脚本契约 + 项目文档 + 共享工具库 |
-| `build_issue_history_context()` | user 片段 | 此前全部 moderate / major / critical 问题的回归清单（跨轮记忆） |
+| `build_issue_history_context()` | user 片段 | 此前最近 `loop.issue_history_window` 条 moderate / major / critical 问题的回归清单（跨轮记忆） |
 | `build_human_hint_context()` | user 片段 | 每一轮注入的 `--human-hint` |
 | `build_review_prompt()` | user | 迭代号、视角文件名、通过阈值、规格 + 上述片段 + 产生本轮图片的精确脚本；多视角图片随后以 JPEG base64 追加 |
 

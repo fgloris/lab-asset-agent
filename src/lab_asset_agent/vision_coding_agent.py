@@ -287,6 +287,17 @@ class VisionCodingAgent:
 
     @classmethod
     def _parse_decision(cls, text: str) -> VisionCodeDecision:
+        difference_match = re.search(
+            r"<DIFFERENCE>\s*(.*?)\s*</DIFFERENCE>",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not difference_match:
+            raise RuntimeError("GPT response is missing <DIFFERENCE>.")
+        difference = difference_match.group(1).strip()
+        if not difference:
+            raise RuntimeError("GPT <DIFFERENCE> must not be empty.")
+
         review_match = re.search(
             r"<REVIEW_JSON>\s*(.*?)\s*</REVIEW_JSON>",
             text,
@@ -333,8 +344,6 @@ class VisionCodingAgent:
                     "uncertain geometry must not be diagnosed before retaking views."
                 )
 
-        summary = review.summary
-
         script_match = re.search(
             r"<BLENDER_SCRIPT>\s*(.*?)\s*</BLENDER_SCRIPT>",
             text,
@@ -356,7 +365,6 @@ class VisionCodingAgent:
         return VisionCodeDecision(
             review=review,
             revised_script=script,
-            summary=summary,
+            summary=difference,
             raw_response=text,
         )
-

@@ -131,6 +131,7 @@ class ModelsConfig(BaseModel):
 class LoopConfig(BaseModel):
     max_iterations: int = Field(default=8, ge=1, le=50)
     pass_score: float = Field(default=8.5, ge=0, le=10)
+    issue_history_window: int = Field(default=5, ge=0, le=200)
     keep_all_iterations: bool = True
     stop_on_repeated_script: bool = True
     max_consecutive_render_failures: int = Field(default=3, ge=1, le=20)
@@ -173,7 +174,6 @@ class VisualIssue(BaseModel):
         "shape"
     )
     severity: Literal["critical", "major", "moderate", "minor"]
-    view_names: list[str] = Field(default_factory=list)
     observation: str
     likely_cause: str
     recommended_change: str
@@ -192,7 +192,6 @@ class VLMReview(BaseModel):
     similarity_score: float = Field(ge=0.0, le=10.0)
     issues: list[VisualIssue] = Field(default_factory=list)
     preserve: list[str] = Field(default_factory=list)
-    summary: str
 
 
 class RenderResult(BaseModel):

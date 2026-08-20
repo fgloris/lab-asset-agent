@@ -443,7 +443,7 @@ class AssetGenerationOrchestrator:
         write_json(run_dir / "manifest.json", manifest)
         write_json(
             run_dir / "issue_history.json",
-            [item.model_dump(mode="json") for item in self._collect_issue_history(manifest)],
+            [item.model_dump(mode="json") for item in self._collect_all_issue_history(manifest)],
         )
 
     def _finalize_passed(
@@ -608,9 +608,20 @@ class AssetGenerationOrchestrator:
     def _review_passes(self, review) -> bool:
         return review.verdict == "pass" and review.similarity_score >= self.config.loop.pass_score
 
+    def _collect_issue_history(self, manifest: RunManifest) -> list[HistoricalVisualIssue]:
+        """Return recent prior moderate-or-higher issues in chronological order.
+        The rolling window is used only for prompt context; issue_history.json
+        remains a full archival record.
+        """
+        history = self._collect_all_issue_history(manifest)
+        window = self.config.loop.issue_history_window
+        if window == 0:
+            return []
+        return history[-window:]
+
     @staticmethod
-    def _collect_issue_history(manifest: RunManifest) -> list[HistoricalVisualIssue]:
-        """Return prior moderate-or-higher issues in chronological order.
+    def _collect_all_issue_history(manifest: RunManifest) -> list[HistoricalVisualIssue]:
+        """Return all prior moderate-or-higher issues in chronological order.
         Legacy minor issues remain readable in old manifests but are not fed back
         to the model or written to the active regression checklist.
         """

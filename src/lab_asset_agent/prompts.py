@@ -161,21 +161,21 @@ similarity_score 如何计算：
 对比度、阴影以及其他光照/渲染风格差异；但不得用这些风格理由掩盖真实几何差异。绝不要通过修改相机或渲染
 来掩盖真实缺陷。
 
-输出格式必须严格如下（标签名 <REVIEW_JSON> 和 <BLENDER_SCRIPT> 保持英文，不要使用 Markdown 代码围栏）：
+输出格式必须严格如下（标签名 <DIFFERENCE>、<REVIEW_JSON> 和 <BLENDER_SCRIPT> 保持英文，不要使用 Markdown 代码围栏）：
 
+<DIFFERENCE>
+先显式对比目标参考图片与当前渲染结果。必须点名主要相同点、主要差异、差异涉及的视角/参考图；不要写成泛泛总结。
+</DIFFERENCE>
 <REVIEW_JSON>
 一个合法 JSON 对象。字段名(key)和枚举值必须完全使用下面的英文，不得翻译或改写；字段内容(value)可用中文。
 - `verdict`: `pass` | `revise` | `retake_views`
 - `similarity_scores`: 0 到 10 的小数数组，长度与参考图数量相同
 - `similarity_score`: 0 到 10 的小数
-- `issues`: 数组，每项字段为 `review_axis`、`severity`、`view_names`、`observation`、`likely_cause`、
-  `recommended_change`
+- `issues`: 数组，每项字段为 `review_axis`、`severity`、`observation`、`likely_cause`、`recommended_change`
   - `review_axis`: `camera_coverage` | `shape` | `graduations`
   - `severity`: `moderate` | `major` | `critical`
-  - `view_names`: 字符串数组，填写问题涉及的渲染视角文件名
   - `observation`、`likely_cause`、`recommended_change`: 字符串，可用中文
-- `preserve`: 字符串数组，列出必须保留的正确内容
-- `summary`: 字符串，可用中文
+- `preserve`: 字符串数组，列出需要保留的正确内容
 </REVIEW_JSON>
 <BLENDER_SCRIPT>
 当 verdict 为 revise 或 retake_views 时，本段为完整可执行的 Python 文件。pass 时省略本段。
@@ -251,6 +251,7 @@ def build_review_prompt(
 
 {issue_history_context}
 
+人类指导（非常重要，请严格遵循）：
 {human_hint_context}
 
 {reference_guidance}
